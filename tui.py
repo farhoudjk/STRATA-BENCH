@@ -20,7 +20,7 @@ from rich.text import Text
 
 from benchmark.launcher import kill_stale_gpu_workers
 from config.strategies import STRATEGIES, Strategy, get_strategies_for_dimension
-from config.workloads import ARRIVAL_RATES, ArrivalPattern, BURSTY_LABEL, WORKLOADS
+from config.workloads import WORKLOADS
 
 console = Console()
 
@@ -220,8 +220,8 @@ def ask_strategies() -> list[str]:
     return selected or []
 
 
-def ask_workloads() -> tuple[list[str], list[str]]:
-    """Return (workload_names, rate_labels)."""
+def ask_workloads() -> tuple[list[str], list[str], list[str]]:
+    """Return (workload_names, rate_labels, arrival_pattern_labels)."""
 
     # ── Step 1: workload shapes ──────────────────────────────────────────────
     wl_choices = [
@@ -239,12 +239,12 @@ def ask_workloads() -> tuple[list[str], list[str]]:
         style=STYLE,
     ).ask() or []
 
-    # ── Step 2: arrival rates ────────────────────────────────────────────────
+    # ── Step 2: arrival rps rate(s) ───────────────────────────────────────────
     rate_choices = [
-        questionary.Choice("low    — 2 rps  (Poisson)",  value="low",    checked=False),
-        questionary.Choice("med    — 4 rps  (Poisson)",  value="med",    checked=False),
-        questionary.Choice("high   — 8 rps  (Poisson)",  value="high",   checked=False),
-        questionary.Choice("bursty — burst pattern",     value="bursty", checked=False),
+        questionary.Choice("low    — 2 rps",  value="low",   checked=False),
+        questionary.Choice("med    — 4 rps",  value="med",   checked=False),
+        questionary.Choice("high   — 8 rps",  value="high",  checked=False),
+        questionary.Choice("vhigh  — 16 rps", value="vhigh", checked=False),
     ]
     selected_rates = questionary.checkbox(
         "Select arrival rate(s)  [Space=toggle, Enter=confirm]:",
@@ -252,7 +252,21 @@ def ask_workloads() -> tuple[list[str], list[str]]:
         style=STYLE,
     ).ask() or []
 
-    return selected_wl, selected_rates
+    # ── Step 3: arrival pattern(s) ────────────────────────────────────────────
+    # Orthogonal to rate: each selected rate above is replayed under every
+    # pattern selected here (e.g. low+high rates x poisson+bursty patterns
+    # runs all four combinations).
+    pattern_choices = [
+        questionary.Choice("poisson — steady-state random arrivals", value="poisson", checked=True),
+        questionary.Choice("bursty  — clustered burst arrivals",     value="bursty",  checked=False),
+    ]
+    selected_patterns = questionary.checkbox(
+        "Select arrival pattern(s)  [Space=toggle, Enter=confirm]:",
+        choices=pattern_choices,
+        style=STYLE,
+    ).ask() or []
+
+    return selected_wl, selected_rates, selected_patterns
 
 
 _SEQS_DEFAULT = "default"
@@ -313,6 +327,10 @@ def ask_options() -> dict:
     gpu = ask_gpus()
     port = questionary.text("Base port for vLLM:", default="8100", style=STYLE).ask()
     timeout = questionary.text("Request timeout (seconds):", default="300", style=STYLE).ask()
+    ttft_timeout = questionary.text(
+        "TTFT timeout — abort if no first token arrives within (seconds):",
+        default="120", style=STYLE,
+    ).ask()
 
     num_requests = questionary.select(
         "Number of requests per workload:",
@@ -333,7 +351,7 @@ def ask_options() -> dict:
             "Enter number of requests:", default="300", style=STYLE
         ).ask()
 
-    return {"gpu": gpu, "port": port, "timeout": timeout,
+    return {"gpu": gpu, "port": port, "timeout": timeout, "ttft_timeout": ttft_timeout,
             "num_requests": num_requests, "max_concurrent": "64"}
 
 
@@ -342,6 +360,7 @@ def confirm_and_run(
     strategies: list[str],
     workloads: list[str],
     rates: list[str],
+    patterns: list[str],
     seqs_values: list[int | None],
     opts: dict,
 ):
@@ -352,8 +371,10 @@ def confirm_and_run(
         wl_obj = WORKLOADS[wl]
         console.print(f"  Workload:   [yellow]{wl}[/yellow]  [dim](n={wl_obj.num_requests}, {wl_obj.task_type.value})[/dim]")
     console.print(f"  Rates:      [yellow]{', '.join(rates)}[/yellow]")
+    console.print(f"  Patterns:   [yellow]{', '.join(patterns)}[/yellow]")
     console.print(f"  max_num_seqs: [yellow]{', '.join(str(v) if v else 'default' for v in seqs_values)}[/yellow]")
     console.print(f"  GPU(s):     [yellow]{opts['gpu']}[/yellow]")
+    console.print(f"  TTFT timeout: [yellow]{opts['ttft_timeout']}s[/yellow]")
     console.print()
     strategy_table(strategies)
 
@@ -381,10 +402,11 @@ def confirm_and_run(
         "--gpu-indices", opts["gpu"],
         "--port", opts["port"],
         "--request-timeout", opts["timeout"],
+        "--ttft-timeout", opts["ttft_timeout"],
         "--num-requests", opts["num_requests"],
         "--max-concurrent", opts["max_concurrent"],
         "--workloads",
-    ] + workloads + ["--rates"] + rates
+    ] + workloads + ["--rates"] + rates + ["--arrival-patterns"] + patterns
 
     console.print(f"[dim]Run ID: {run_id} (shared across all runs)[/dim]\n")
     console.print()
@@ -418,18 +440,21 @@ def main():
         console.print("[red]No strategies selected. Exiting.[/red]")
         return
 
-    workloads, rates = ask_workloads()
+    workloads, rates, patterns = ask_workloads()
     if not workloads:
         console.print("[red]No workloads selected. Exiting.[/red]")
         return
     if not rates:
         console.print("[red]No arrival rates selected. Exiting.[/red]")
         return
+    if not patterns:
+        console.print("[red]No arrival patterns selected. Exiting.[/red]")
+        return
 
     seqs_values = ask_max_num_seqs()
 
     opts = ask_options()
-    confirm_and_run(model, strategies, workloads, rates, seqs_values, opts)
+    confirm_and_run(model, strategies, workloads, rates, patterns, seqs_values, opts)
 
 
 if __name__ == "__main__":

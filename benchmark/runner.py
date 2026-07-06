@@ -78,8 +78,10 @@ class BenchmarkResult:
     gpu_result: Optional[GPUMonitorResult] = None
     wall_time_s: float = 0.0
     vllm_startup_time_s: float = 0.0
-    rate_label: str = ""          # e.g. "low", "med", "high", "bursty"
+    rate_label: str = ""          # e.g. "low_poisson", "high_bursty"
     effective_rps: float = 0.0    # actual rps used (0 for bursty)
+    arrival_pattern: str = ""     # "poisson" | "bursty"
+    max_concurrent: int = 0       # concurrency cap (semaphore limit) used for this run
 
     def successful(self) -> list[RequestResult]:
         return [r for r in self.requests if r.status == "ok"]
@@ -110,6 +112,8 @@ class BenchmarkResult:
             "workload":       self.workload_name,
             "rate_label":     self.rate_label,
             "effective_rps":  self.effective_rps,
+            "arrival_pattern": self.arrival_pattern,
+            "max_concurrent": self.max_concurrent,
             "n_ok":           len(ok),
             "n_error":        len(self.requests) - len(ok),
             "ttft_p50_ms":    pct(ttfts, 50),
@@ -150,6 +154,7 @@ async def _send_request(
     strategy_name: str,
     workload_name: str,
     timeout_s: float = 300.0,
+    ttft_timeout_s: float = 120.0,
 ) -> RequestResult:
     result = RequestResult(
         request_id=req.request_id,
@@ -161,10 +166,37 @@ async def _send_request(
         arrival_time=req.arrival_time,
     )
 
+    # Clamp max_tokens so prompt + completion never exceeds the server's
+    # max_model_len — real-dataset workloads (e.g. OpenMathReasoning CoT
+    # traces) can have reference output lengths that alone exceed the
+    # context window. A margin absorbs the vLLM tokenizer occasionally
+    # counting a few more prompt tokens than our local estimate.
+    context_margin = 16
+    max_completion_tokens = instance.strategy.max_model_len - req.prompt_token_len - context_margin
+    if max_completion_tokens < 1:
+        # Prompt alone already fills (or nearly fills) the context window —
+        # rare (e.g. ShareGPT's long tail) but no max_tokens value can fix
+        # this, so fail fast rather than send a request vLLM will reject.
+        result.status = "error"
+        result.error = (
+            f"prompt_token_len={req.prompt_token_len} leaves no room for output "
+            f"under max_model_len={instance.strategy.max_model_len}"
+        )
+        logger.warning(f"[{req.request_id}] {result.error}")
+        return result
+
+    effective_max_tokens = min(req.target_output_tokens, max_completion_tokens)
+    if effective_max_tokens < req.target_output_tokens:
+        logger.debug(
+            f"[{req.request_id}] clamping max_tokens {req.target_output_tokens} -> "
+            f"{effective_max_tokens} (prompt_len={req.prompt_token_len}, "
+            f"max_model_len={instance.strategy.max_model_len})"
+        )
+
     payload = {
         "model": instance.model,
         "prompt": req.prompt,
-        "max_tokens": req.target_output_tokens,
+        "max_tokens": effective_max_tokens,
         "temperature": 0.0,
         "stream": True,
         "stream_options": {"include_usage": True},
@@ -198,7 +230,23 @@ async def _send_request(
                 logger.warning(f"[{req.request_id}] {result.error}")
                 return result
 
-            async for raw_line in resp.content:
+            content_iter = resp.content.__aiter__()
+            while True:
+                try:
+                    if first_token_received:
+                        raw_line = await content_iter.__anext__()
+                    else:
+                        # Bound time-to-first-token specifically, independent of
+                        # the overall request timeout — a request stuck queued
+                        # behind other work should fail fast rather than tie up
+                        # a concurrency slot for the full request timeout.
+                        remaining = ttft_timeout_s - (time.perf_counter() - t_send)
+                        if remaining <= 0:
+                            raise asyncio.TimeoutError("ttft_timeout")
+                        raw_line = await asyncio.wait_for(content_iter.__anext__(), timeout=remaining)
+                except StopAsyncIteration:
+                    break
+
                 if not first_byte_received:
                     # TTFB: first byte of any response, before parsing — separates
                     # scheduler queueing delay from model compute time (TTFT below)
@@ -268,7 +316,8 @@ async def _send_request(
     except asyncio.TimeoutError:
         elapsed = time.perf_counter() - t_send
         result.status = "timeout"
-        result.error = f"timeout after {elapsed:.1f}s (first_token={first_token_received}, chunks={chunks_received})"
+        kind = "ttft_timeout" if not first_token_received else "timeout"
+        result.error = f"{kind} after {elapsed:.1f}s (first_token={first_token_received}, chunks={chunks_received})"
         logger.warning(f"[{req.request_id}] {result.error}")
     except aiohttp.ClientError as e:
         result.status = "error"
@@ -289,6 +338,7 @@ async def run_benchmark(
     workload_config: WorkloadConfig,
     gpu_monitor: Optional[GPUMonitor] = None,
     request_timeout_s: float = 300.0,
+    ttft_timeout_s: float = 120.0,
     max_concurrent: int = 64,
     metrics_poll_interval_s: float = 5.0,
     seed: int = 42,
@@ -310,12 +360,15 @@ async def run_benchmark(
         target_rps=target_rps,
     )
 
+    effective_pattern = arrival_pattern if arrival_pattern is not None else workload_config.default_arrival_pattern
     result = BenchmarkResult(
         strategy=strategy,
         workload_name=workload_config.name,
         vllm_startup_time_s=instance.startup_time_s,
         rate_label=rate_label or workload_config.default_arrival_pattern.value,
         effective_rps=target_rps or workload_config.default_target_rps,
+        arrival_pattern=effective_pattern.value,
+        max_concurrent=max_concurrent,
     )
 
     gpu_result = gpu_monitor.start(strategy.name) if gpu_monitor else None
@@ -351,6 +404,7 @@ async def run_benchmark(
                 strategy_name=strategy.name,
                 workload_name=workload_config.name,
                 timeout_s=request_timeout_s,
+                ttft_timeout_s=ttft_timeout_s,
             )
             # attach latest server metrics snapshot
             r.kv_cache_usage_pct = server_metrics_cache.get("vllm:gpu_cache_usage_perc", 0.0)

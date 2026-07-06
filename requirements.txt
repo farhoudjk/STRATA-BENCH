@@ -5,6 +5,11 @@ aiohttp>=3.9.0,<4.0.0
 numpy>=1.26.0
 pandas>=2.2.0
 
+# ── Real-data workloads (config/workloads.py: ShareGPT, CNN/DailyMail,
+#    GSM8K, MBPP) — dataset download + tokenizer for accurate token counts ──
+huggingface_hub>=0.24.0
+transformers>=4.40.0
+
 # ── Cost model fitting ─────────────────────────────────────────────────────
 scikit-learn>=1.4.0
 

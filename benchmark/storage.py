@@ -28,8 +28,8 @@ REQUEST_FIELDS = [
     "spec_draft_acceptance_rate", "spec_decode_efficiency",
     "ttfb_s", "itl_mean_ms", "itl_p50_ms", "itl_p95_ms", "itl_max_ms",
     "completion_ratio",
-    # rate columns — joined from BenchmarkResult, not RequestResult
-    "rate_label", "effective_rps",
+    # rate/concurrency columns — joined from BenchmarkResult, not RequestResult
+    "rate_label", "effective_rps", "arrival_pattern", "max_concurrent",
 ]
 
 GPU_SAMPLE_FIELDS = [
@@ -82,8 +82,10 @@ class ResultStore:
                 self._requests_header_written = True
             for req in result.requests:
                 row = {k: getattr(req, k, "") for k in REQUEST_FIELDS}
-                row["rate_label"]    = result.rate_label
-                row["effective_rps"] = result.effective_rps
+                row["rate_label"]      = result.rate_label
+                row["effective_rps"]   = result.effective_rps
+                row["arrival_pattern"] = result.arrival_pattern
+                row["max_concurrent"]  = result.max_concurrent
                 writer.writerow(row)
 
     def _save_gpu_samples(self, gpu_result: GPUMonitorResult) -> None:

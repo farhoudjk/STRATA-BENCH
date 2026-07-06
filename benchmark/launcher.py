@@ -79,7 +79,7 @@ def _log_system_state(label: str, port: int) -> None:
     logger.info("\n".join(lines))
 
 BASE_PORT = 8100
-VLLM_STARTUP_TIMEOUT_S = 180       # large models take time to load
+VLLM_STARTUP_TIMEOUT_S = 360       # large models / slow CUDA graph warmup on V100
 HEALTH_POLL_INTERVAL_S  = 3.0
 
 
@@ -125,6 +125,18 @@ class VLLMLauncher:
         self.extra_vllm_args = extra_vllm_args or []
         self._current_instance: Optional[VLLMInstance] = None
 
+    # Models whose CUDA graph warmup hangs on V100 (Volta, compute 7.0).
+    # These are typically bfloat16-native models vLLM casts to float16, which
+    # causes graph capture to stall indefinitely. --enforce-eager bypasses it.
+    _ENFORCE_EAGER_MODELS = {
+        "mistral-nemo", "gemma-2", "gemma-3", "phi-4",
+        "qwq", "deepseek-r1",
+    }
+
+    def _needs_enforce_eager(self) -> bool:
+        model_lower = self.model.lower()
+        return any(k in model_lower for k in self._ENFORCE_EAGER_MODELS)
+
     def _build_command(self, strategy: Strategy, port: int) -> list[str]:
         cmd = [
             sys.executable, "-m", "vllm.entrypoints.openai.api_server",
@@ -133,6 +145,10 @@ class VLLMLauncher:
             "--host", "127.0.0.1",
         ]
         cmd += strategy.to_vllm_args()
+        # Some models' CUDA graph warmup hangs on V100; fall back to eager execution.
+        if self._needs_enforce_eager() and "--enforce-eager" not in cmd:
+            cmd += ["--enforce-eager"]
+            logger.info(f"Auto-adding --enforce-eager for model {self.model} (V100 CUDA graph workaround)")
         cmd += self.extra_vllm_args
         return cmd
 

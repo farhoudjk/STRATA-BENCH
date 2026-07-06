@@ -58,6 +58,8 @@ def parse_args():
     p.add_argument("--port",        default=8100, type=int)
     p.add_argument("--max-concurrent", default=16, type=int, help="Max concurrent requests")
     p.add_argument("--request-timeout", default=300, type=float)
+    p.add_argument("--ttft-timeout", default=120, type=float,
+                   help="Abort a request if no first token arrives within this many seconds")
     p.add_argument("--seed",        default=42, type=int)
 
     # What to run
@@ -70,7 +72,10 @@ def parse_args():
     p.add_argument("--workload", default="chat", help="Workload name")
     p.add_argument("--workloads", nargs="+", help="Multiple workloads")
     p.add_argument("--rates", nargs="+", default=["low"],
-                   help="Arrival rates: low(2rps) med(4rps) high(8rps) bursty")
+                   help="Arrival rps rates: low(2rps) med(4rps) high(8rps) vhigh(16rps)")
+    p.add_argument("--arrival-patterns", nargs="+", default=["poisson"],
+                   choices=["poisson", "bursty"],
+                   help="Arrival pattern(s) to replay each rate with")
     p.add_argument("--max-num-seqs-override", type=int, default=None,
                    help="Override max_num_seqs for the selected strategy (from TUI seqs sweep)")
     p.add_argument("--no-gpu-monitor", action="store_true")
@@ -131,16 +136,18 @@ async def run(args):
             logger.info(f"Overriding num_requests for [{wl.name}]: {wl.num_requests} → {args.num_requests}")
             wl.num_requests = args.num_requests
 
-    # Parse rate labels → (ArrivalPattern, rps | None)
+    # Parse (rps rate label × arrival pattern) → (rate_label, ArrivalPattern, rps)
     rate_labels = getattr(args, "rates", ["low"])
+    pattern_labels = getattr(args, "arrival_patterns", ["poisson"])
     rate_configs: list[tuple[str, ArrivalPattern, float | None]] = []
     for rl in rate_labels:
-        if rl == BURSTY_LABEL:
-            rate_configs.append((rl, ArrivalPattern.BURSTY, None))
-        elif rl in ARRIVAL_RATES:
-            rate_configs.append((rl, ArrivalPattern.POISSON, ARRIVAL_RATES[rl]))
-        else:
+        if rl not in ARRIVAL_RATES:
             logger.warning(f"Unknown rate label '{rl}', skipping.")
+            continue
+        for pl in pattern_labels:
+            pattern = ArrivalPattern.BURSTY if pl == BURSTY_LABEL else ArrivalPattern.POISSON
+            label = f"{rl}_{pl}"
+            rate_configs.append((label, pattern, ARRIVAL_RATES[rl]))
 
     launcher  = VLLMLauncher(
         model=args.model,
@@ -188,6 +195,7 @@ async def run(args):
                         workload_config=workload,
                         gpu_monitor=gpu_monitor,
                         request_timeout_s=args.request_timeout,
+                        ttft_timeout_s=args.ttft_timeout,
                         max_concurrent=args.max_concurrent,
                         seed=args.seed,
                         arrival_pattern=arr_pattern,
