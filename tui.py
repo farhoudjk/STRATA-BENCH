@@ -273,7 +273,7 @@ def ask_workloads() -> tuple[list[str], list[str], list[str]]:
 
 _SEQS_DEFAULT = "default"
 MAX_NUM_SEQS_OPTIONS = [
-    ("default (strategy built-in)", _SEQS_DEFAULT),
+    ("default (vLLM built-in, 256)", _SEQS_DEFAULT),
     ("16  — low parallelism",       16),
     ("32  — medium",                32),
     ("64  — high parallelism",      64),
@@ -331,12 +331,11 @@ _VLLM_DEFAULT_MAX_NUM_SEQS = 256
 
 
 def _derive_max_concurrent(seqs_values: list[int | None]) -> int:
-    """max_concurrent (client) only needs to stay comfortably above whatever
-    max_num_seqs (server) is under test, so the server's scheduler is always
-    the bottleneck rather than the client's connection pool. Single knob:
-    the user only sets max_num_seqs; this is derived, not asked."""
+    """max_concurrent (client) mirrors whatever max_num_seqs (server) is
+    under test, exactly — single knob: the user only sets max_num_seqs,
+    this is derived, not asked."""
     effective = [v if v is not None else _VLLM_DEFAULT_MAX_NUM_SEQS for v in seqs_values]
-    return max(effective) + 32 if effective else 64
+    return max(effective) if effective else 64
 
 
 def ask_options(seqs_values: list[int | None]) -> dict:
