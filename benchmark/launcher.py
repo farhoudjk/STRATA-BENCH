@@ -133,11 +133,56 @@ class VLLMLauncher:
         "qwq", "deepseek-r1",
     }
 
+    # Models whose native context (max_position_embeddings) is shorter than
+    # the strategy default of 8192 — vLLM refuses to start otherwise
+    # ("max_model_len is greater than the derived max_model_len").
+    _MAX_MODEL_LEN_OVERRIDES = {
+        "llama-2": 4096,
+    }
+
     def _needs_enforce_eager(self) -> bool:
         model_lower = self.model.lower()
         return any(k in model_lower for k in self._ENFORCE_EAGER_MODELS)
 
+    def _native_max_model_len(self) -> Optional[int]:
+        model_lower = self.model.lower()
+        for key, limit in self._MAX_MODEL_LEN_OVERRIDES.items():
+            if key in model_lower:
+                return limit
+        return None
+
+    # AWQ kernels require Turing or newer (compute capability >= 7.5).
+    # V100 (Volta) is 7.0 — vLLM builds and starts loading the model before
+    # discovering this, wasting ~15-25s per attempt with a deep traceback.
+    _AWQ_MIN_COMPUTE_CAPABILITY = (7, 5)
+
+    def _check_quantization_support(self, strategy: Strategy) -> None:
+        is_awq = "awq" in self.model.lower() or strategy.quantization == "awq"
+        if not is_awq:
+            return
+        import torch
+        if not torch.cuda.is_available():
+            return
+        major, minor = torch.cuda.get_device_capability(0)
+        if (major, minor) < self._AWQ_MIN_COMPUTE_CAPABILITY:
+            gpu_name = torch.cuda.get_device_properties(0).name
+            raise RuntimeError(
+                f"Model '{self.model}' requires AWQ quantization, which needs GPU compute "
+                f"capability >= {self._AWQ_MIN_COMPUTE_CAPABILITY[0]}.{self._AWQ_MIN_COMPUTE_CAPABILITY[1]} "
+                f"(Turing or newer). This GPU ({gpu_name}) is compute {major}.{minor} and does not "
+                f"support AWQ kernels — this is a hardware limitation, not fixable via configuration. "
+                f"Use an unquantized or fp8/gptq checkpoint instead."
+            )
+
     def _build_command(self, strategy: Strategy, port: int) -> list[str]:
+        native_limit = self._native_max_model_len()
+        if native_limit is not None and strategy.max_model_len > native_limit:
+            logger.info(
+                f"Capping max_model_len for model {self.model}: "
+                f"{strategy.max_model_len} → {native_limit} (model's native context limit)"
+            )
+            strategy.max_model_len = native_limit
+
         cmd = [
             sys.executable, "-m", "vllm.entrypoints.openai.api_server",
             "--model", self.model,
@@ -319,6 +364,7 @@ class VLLMLauncher:
 
     async def start(self, strategy: Strategy, port: int = BASE_PORT) -> VLLMInstance:
         """Launch vLLM for the given strategy and wait until healthy."""
+        self._check_quantization_support(strategy)
         _log_system_state(f"before-start:{strategy.name}", port)
         # Evict any stale port-holder or GPU-resident engine worker from a prior run
         self._kill_port_holder(port)

@@ -106,6 +106,8 @@ PRESET_MODELS = {
         ("Llama-3.2-3B-Instruct",  "meta-llama/Llama-3.2-3B-Instruct"),
         ("Llama-3.2-11B-Vision",   "meta-llama/Llama-3.2-11B-Vision-Instruct"),
         ("Llama-3.3-70B-Instruct", "meta-llama/Llama-3.3-70B-Instruct"),
+        ("Llama-2-7B-Chat-AWQ",    "TheBloke/Llama-2-7B-Chat-AWQ"),
+        ("Llama-2-13B-Chat",       "meta-llama/Llama-2-13b-chat-hf"),
     ],
     "Mistral": [
         ("Mistral-7B-Instruct-v0.3",  "mistralai/Mistral-7B-Instruct-v0.3"),
@@ -289,8 +291,8 @@ def ask_max_num_seqs() -> list[int | None]:
         for label, val in MAX_NUM_SEQS_OPTIONS
     ]
     selected = questionary.checkbox(
-        "Select max_num_seqs (scheduler concurrency)  [Space=toggle, Enter=confirm]:\n"
-        "  Each value runs as a separate sweep — pick one to keep it simple:",
+        "Select max_num_seqs (concurrency: vLLM's scheduler batch size limit)\n"
+        "  [Space=toggle, Enter=confirm]. Each value runs as a separate sweep — pick one to keep it simple:",
         choices=choices,
         style=STYLE,
     ).ask() or []
@@ -323,7 +325,21 @@ def ask_gpus() -> str:
     return ",".join(selected)
 
 
-def ask_options() -> dict:
+# vLLM's own built-in default batch size when max_num_seqs isn't overridden
+# (see config/strategies.py — Strategy.max_num_seqs=None means "let vLLM decide").
+_VLLM_DEFAULT_MAX_NUM_SEQS = 256
+
+
+def _derive_max_concurrent(seqs_values: list[int | None]) -> int:
+    """max_concurrent (client) only needs to stay comfortably above whatever
+    max_num_seqs (server) is under test, so the server's scheduler is always
+    the bottleneck rather than the client's connection pool. Single knob:
+    the user only sets max_num_seqs; this is derived, not asked."""
+    effective = [v if v is not None else _VLLM_DEFAULT_MAX_NUM_SEQS for v in seqs_values]
+    return max(effective) + 32 if effective else 64
+
+
+def ask_options(seqs_values: list[int | None]) -> dict:
     gpu = ask_gpus()
     port = questionary.text("Base port for vLLM:", default="8100", style=STYLE).ask()
     timeout = questionary.text("Request timeout (seconds):", default="300", style=STYLE).ask()
@@ -351,8 +367,14 @@ def ask_options() -> dict:
             "Enter number of requests:", default="300", style=STYLE
         ).ask()
 
+    # max_concurrent (client) is derived from max_num_seqs (server), not asked
+    # separately — see _derive_max_concurrent. max_num_seqs is the one knob
+    # that actually drives throughput/latency; max_concurrent just needs to
+    # never be the bottleneck.
+    max_concurrent = str(_derive_max_concurrent(seqs_values))
+
     return {"gpu": gpu, "port": port, "timeout": timeout, "ttft_timeout": ttft_timeout,
-            "num_requests": num_requests, "max_concurrent": "64"}
+            "num_requests": num_requests, "max_concurrent": max_concurrent}
 
 
 def confirm_and_run(
@@ -375,6 +397,7 @@ def confirm_and_run(
     console.print(f"  max_num_seqs: [yellow]{', '.join(str(v) if v else 'default' for v in seqs_values)}[/yellow]")
     console.print(f"  GPU(s):     [yellow]{opts['gpu']}[/yellow]")
     console.print(f"  TTFT timeout: [yellow]{opts['ttft_timeout']}s[/yellow]")
+    console.print(f"  Max concurrent: [yellow]{opts['max_concurrent']}[/yellow] [dim](auto-derived from max_num_seqs)[/dim]")
     console.print()
     strategy_table(strategies)
 
@@ -453,7 +476,7 @@ def main():
 
     seqs_values = ask_max_num_seqs()
 
-    opts = ask_options()
+    opts = ask_options(seqs_values)
     confirm_and_run(model, strategies, workloads, rates, patterns, seqs_values, opts)
 
 

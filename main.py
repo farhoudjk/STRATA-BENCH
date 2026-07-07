@@ -78,6 +78,9 @@ def parse_args():
                    help="Arrival pattern(s) to replay each rate with")
     p.add_argument("--max-num-seqs-override", type=int, default=None,
                    help="Override max_num_seqs for the selected strategy (from TUI seqs sweep)")
+    p.add_argument("--max-model-len-override", type=int, default=None,
+                   help="Override max_model_len for the selected strategy — needed for models "
+                        "with shorter native context than the 8192 default (e.g. Llama-2: 4096)")
     p.add_argument("--no-gpu-monitor", action="store_true")
     p.add_argument("--debug", action="store_true", help="Enable DEBUG logging for request-level diagnostics")
     p.add_argument("--num-requests", type=int, default=None,
@@ -129,6 +132,17 @@ async def run(args):
                 f"{s.max_num_seqs} → {args.max_num_seqs_override}"
             )
             s.max_num_seqs = args.max_num_seqs_override
+
+    # Apply max_model_len override — needed for models with shorter native
+    # context than the 8192 default (e.g. Llama-2's 4096), otherwise vLLM
+    # refuses to start ("max_model_len is greater than the derived max_model_len").
+    if args.max_model_len_override is not None:
+        for s in strategies:
+            logger.info(
+                f"Overriding max_model_len for [{s.name}]: "
+                f"{s.max_model_len} → {args.max_model_len_override}"
+            )
+            s.max_model_len = args.max_model_len_override
 
     workloads = [get_workload(w) for w in workload_names]
     if args.num_requests is not None:
