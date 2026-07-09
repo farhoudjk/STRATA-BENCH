@@ -9,6 +9,7 @@ Each strategy is a named configuration tuple over:
   quantization       : none | awq | fp8
 """
 
+import json
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -60,19 +61,24 @@ class Strategy:
             args += ["--disable-custom-all-reduce"]
 
         if self.enable_speculation:
-            # vLLM 0.6.0 requires the V2 block manager for any speculative decoding mode.
-            args += ["--use-v2-block-manager"]
+            # vLLM >=0.9 collapsed --speculative-model/--use-v2-block-manager/
+            # --ngram-prompt-lookup-max into one --speculative-config JSON dict;
+            # the V1 engine has no block-manager selector at all.
             if self.speculative_model:
-                args += [
-                    "--speculative-model", self.speculative_model,
-                    "--num-speculative-tokens", str(self.num_speculative_tokens),
-                ]
+                spec_config = {
+                    "model": self.speculative_model,
+                    "num_speculative_tokens": self.num_speculative_tokens,
+                }
             elif self.ngram_prompt_lookup_max:
-                args += [
-                    "--speculative-model", "[ngram]",
-                    "--ngram-prompt-lookup-max", str(self.ngram_prompt_lookup_max),
-                    "--num-speculative-tokens", str(self.num_speculative_tokens),
-                ]
+                spec_config = {
+                    "method": "ngram",
+                    "num_speculative_tokens": self.num_speculative_tokens,
+                    "prompt_lookup_max": self.ngram_prompt_lookup_max,
+                }
+            else:
+                spec_config = None
+            if spec_config is not None:
+                args += ["--speculative-config", json.dumps(spec_config)]
         if self.quantization:
             args += ["--quantization", self.quantization]
 
