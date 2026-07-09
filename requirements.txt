@@ -8,7 +8,11 @@ pandas>=2.2.0
 # ── Real-data workloads (config/workloads.py: ShareGPT, CNN/DailyMail,
 #    GSM8K, MBPP) — dataset download + tokenizer for accurate token counts ──
 huggingface_hub>=0.24.0
-transformers>=4.40.0
+pyarrow>=14.0.0         # required by pandas.read_parquet (CNN/DailyMail loader)
+# transformers>=5.0 replaced the tokenizer wrapper with TokenizersBackend,
+# dropping attributes (e.g. all_special_tokens_extended) that vllm==0.11.0
+# still accesses. Pin to the last 4.x release until upgrading vllm.
+transformers>=4.55.2,<5.0.0
 
 # ── Cost model fitting ─────────────────────────────────────────────────────
 scikit-learn>=1.4.0
@@ -21,6 +25,15 @@ seaborn>=0.13.0
 pynvml>=11.5.0          # preferred: direct NVML bindings
 # nvidia-ml-py>=12.0.0  # alternative name on some systems (same package)
 
-# ── vLLM (install separately — version must match your CUDA driver) ────────
-# pip install vllm>=0.4.0
+# ── Interactive CLI (tui.py) ────────────────────────────────────────────────
+questionary>=2.0.0
+
+# ── vLLM + torch (install separately — versions must match your CUDA driver)
+# vllm>=0.20's wheel is built against CUDA 13 (libcudart.so.13) and fails to
+# import on drivers whose max supported CUDA version is 12.8 (check with
+# `nvidia-smi`). vllm==0.11.0 pins torch==2.8.0, whose default PyPI build
+# targets CUDA 12.8 — use this pin on CUDA-12.8-only drivers.
+# Install AFTER the packages above so pip doesn't upgrade transformers past
+# the pin (or reinstall transformers==4.57.1 afterward if it does).
+# pip install vllm==0.11.0
 # See: https://docs.vllm.ai/en/latest/getting_started/installation.html

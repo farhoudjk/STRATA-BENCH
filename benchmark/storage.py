@@ -30,6 +30,11 @@ REQUEST_FIELDS = [
     "completion_ratio",
     # rate/concurrency columns — joined from BenchmarkResult, not RequestResult
     "rate_label", "effective_rps", "arrival_pattern", "max_concurrent",
+    # server-side scheduler concurrency (vLLM --max-num-seqs); distinct from
+    # max_concurrent above, which is the client's semaphore limit and stays
+    # fixed across a max_num_seqs sweep — this is the column that actually
+    # varies per sweep run and lets rows from different runs be told apart.
+    "max_num_seqs",
 ]
 
 GPU_SAMPLE_FIELDS = [
@@ -86,6 +91,7 @@ class ResultStore:
                 row["effective_rps"]   = result.effective_rps
                 row["arrival_pattern"] = result.arrival_pattern
                 row["max_concurrent"]  = result.max_concurrent
+                row["max_num_seqs"]    = result.strategy.max_num_seqs
                 writer.writerow(row)
 
     def _save_gpu_samples(self, gpu_result: GPUMonitorResult) -> None:

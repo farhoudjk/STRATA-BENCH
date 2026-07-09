@@ -79,7 +79,7 @@ def _log_system_state(label: str, port: int) -> None:
     logger.info("\n".join(lines))
 
 BASE_PORT = 8100
-VLLM_STARTUP_TIMEOUT_S = 360       # large models / slow CUDA graph warmup on V100
+VLLM_STARTUP_TIMEOUT_S = 500       # large models / slow CUDA graph warmup on V100
 HEALTH_POLL_INTERVAL_S  = 3.0
 
 
@@ -199,7 +199,11 @@ class VLLMLauncher:
 
     def _launch_process(self, strategy: Strategy, port: int) -> subprocess.Popen:
         cmd = self._build_command(strategy, port)
-        log_path = os.path.join(self.results_dir, f"vllm_{strategy.name}.log")
+        # Include max_num_seqs in the filename so a max_num_seqs sweep (same
+        # strategy, different concurrency) doesn't have each run overwrite the
+        # previous run's log — only the last sweep value's log would survive.
+        log_suffix = f"_seqs{strategy.max_num_seqs}" if strategy.max_num_seqs is not None else ""
+        log_path = os.path.join(self.results_dir, f"vllm_{strategy.name}{log_suffix}.log")
         os.makedirs(self.results_dir, exist_ok=True)
 
         logger.info(f"Launching vLLM [{strategy.name}] on port {port}")
@@ -211,6 +215,12 @@ class VLLMLauncher:
         # Triton flash attention uses MMA kernels that require Ampere+ (compute 8.0+).
         # V100 is Volta (compute 7.0) — disable to fall back to xformers/standard attention.
         env["VLLM_USE_TRITON_FLASH_ATTN"] = "0"
+
+        # FlashInfer's top-k/top-p sampler JIT-compiles a CUDA kernel on first use via
+        # nvcc + ninja. This host has no system CUDA toolkit (no /usr/local/cuda, no
+        # nvcc on PATH), so that JIT compile fails and crashes the engine process after
+        # vLLM otherwise starts up successfully. Force the PyTorch-native sampler instead.
+        env["VLLM_USE_FLASHINFER_SAMPLER"] = "0"
 
         if strategy.tensor_parallel_size > 1:
             # Multi-GPU TP workers run on this same host and rendezvous via Gloo/NCCL.

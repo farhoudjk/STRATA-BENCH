@@ -114,6 +114,7 @@ class BenchmarkResult:
             "effective_rps":  self.effective_rps,
             "arrival_pattern": self.arrival_pattern,
             "max_concurrent": self.max_concurrent,
+            "max_num_seqs": self.strategy.max_num_seqs,
             "n_ok":           len(ok),
             "n_error":        len(self.requests) - len(ok),
             "ttft_p50_ms":    pct(ttfts, 50),

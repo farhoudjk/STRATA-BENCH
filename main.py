@@ -124,9 +124,20 @@ async def run(args):
         logger.error("No execution mode specified.")
         sys.exit(1)
 
-    # Apply max_num_seqs override from TUI seqs sweep (mutates strategy objects)
+    # Apply max_num_seqs override from TUI seqs sweep (mutates strategy objects).
+    # Chunked-prefill strategies (chunked_prefill_size set) pin max_num_seqs=256
+    # deliberately so a chunk-size sweep isn't confounded with admission
+    # concurrency — skip the override for those rather than silently
+    # reintroducing that confound (see chunked_256 incident, 2026-07-08).
     if args.max_num_seqs_override is not None:
         for s in strategies:
+            if s.chunked_prefill_size is not None:
+                logger.info(
+                    f"Skipping max_num_seqs override for [{s.name}]: "
+                    f"chunked-prefill strategies pin max_num_seqs={s.max_num_seqs} "
+                    "to isolate chunk size as the sole swept variable."
+                )
+                continue
             logger.info(
                 f"Overriding max_num_seqs for [{s.name}]: "
                 f"{s.max_num_seqs} → {args.max_num_seqs_override}"
