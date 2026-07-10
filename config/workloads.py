@@ -502,7 +502,7 @@ WORKLOADS: dict[str, WorkloadConfig] = {
     "chat": WorkloadConfig(
         name="chat",
         task_type=TaskType.CHAT,
-        prompt_lengths=[128, 256, 512, 1024],
+        prompt_lengths=[128, 256, 512],
         output_lengths=[64, 128, 256],
         num_requests=300,
         default_target_rps=2.0,
