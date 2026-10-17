@@ -1,136 +1,192 @@
-# LLM Execution Strategy Benchmark
+# STRATA-Bench
 
-> **Research artifact for:** *"Compiler-Inspired Execution Planning for LLM Request Dispatch"*  
-> Target venue: ICSE 2027
+**A Regime-Aware Benchmark of Execution Strategy Efficiency in LLM Serving**
 
----
+[![Paper](https://img.shields.io/badge/Paper-ACM%20POMACS%20%2F%20SIGMETRICS%202027-blue)](https://doi.org/10.1145/3857383)
+[![DOI](https://img.shields.io/badge/DOI-10.1145%2F3857383-informational)](https://doi.org/10.1145/3857383)
+[![Artifact](https://img.shields.io/badge/Artifact-Zenodo%2021302857-green)](https://zenodo.org/records/21302857)
+[![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey.svg)](#license)
 
-## Research Motivation
+Farhoud Jafari Kaleibar, Honggeun Ji, Amr M. Zaki, Marin Litoiu — York University, Toronto, Canada
 
-Modern LLM serving systems (vLLM, SGLang, TensorRT-LLM) fix their execution strategy at deployment time. Every incoming request — regardless of its prompt length, expected output length, or task type — is served identically: same prefill mode, same parallelism degree, same speculation policy.
-
-This is analogous to a database that ignores query statistics and always uses a full table scan.
-
-**The core empirical question this benchmark answers:**
-
-> *Does no single execution strategy dominate across all request characteristics and workload patterns? If so, what is the cost of static misconfiguration, and which request features predict the optimal strategy?*
-
-These findings are the empirical foundation for a per-request execution planner (Paper 2), analogous to a query optimizer in databases.
+> Official benchmark harness for the paper *"STRATA-Bench: A Regime-Aware Benchmark of Execution Strategy Efficiency in LLM Serving"*, Proc. ACM Meas. Anal. Comput. Syst. (POMACS) **10**(3), Article 080, December 2026 — presented at **ACM SIGMETRICS 2027**.
 
 ---
 
-## Project Structure
+## Overview
+
+LLM serving systems deploy execution strategies — chunked prefill, speculative decoding, concurrency admission control — as **static, deployment-time configurations** applied uniformly to every request. STRATA-Bench measures how the efficiency of those strategies actually depends on **workload, offered load, arrival pattern, and model architecture**.
+
+The harness instruments vLLM (V1 engine) and records full per-request latency distributions — TTFT, inter-token latency (ITL), end-to-end latency (E2E), speculative acceptance rate, preemptions and SLO attainment — across a grid of execution strategies, four real-world workload types plus a mixed composition, Poisson and bursty arrivals at four offered rates (2–16 req/s), and four model architectures (7B–13B) spanning grouped-query and multi-head attention on NVIDIA V100 and L40S GPUs.
+
+**Central finding:** no single static configuration is efficient across the operating envelope a production serving system encounters. Each mechanism has *regimes* in which it flips from beneficial to harmful, and those regime boundaries are a property of the deployment, not of the mechanism.
+
+---
+
+## Methodology
+
+<p align="center">
+  <img src="docs/figures/fig1_methodology.png" alt="STRATA-Bench methodology overview" width="100%">
+</p>
+<p align="center"><em>Figure 1. Benchmark methodology overview (paper Fig. 1).</em></p>
+
+The pipeline has three stages:
+
+**1. Benchmark configurations.** Each experiment is a point in a configuration space:
+
+| Component | What it defines | Code |
+|---|---|---|
+| **Workloads** | A request trace $\mathcal{W} = \{(x_i, y_i, t_i)\}_{i=1}^{N}$ of input length, output length and task type. Each task type exists in a *synthetic* form (precise length control) and a *real* form (natural heavy-tailed distributions). | `config/workloads.py` |
+| **Load generation** | Offered rate $\lambda \in \{2, 4, 8, 16\}$ req/s; Poisson ($\Delta t \sim \mathrm{Exp}(\lambda)$) or bursty (bursts of $b = 8$) arrivals with matched long-run rate. | `config/workloads.py` |
+| **Models** | Any vLLM-servable Hugging Face checkpoint (preset library or custom ID). | `tui.py`, `--model` |
+| **Execution strategies** | Configuration tuple $\mathbf{c} = (\tau, \chi, \ell, \pi, p)$: strategy type, chunk size, speculative lookup length, tensor-parallel degree, precision. | `config/strategies.py` |
+| **Experiment orchestrator** | Sequences the grid, manages server lifecycle (launch, warm-up, teardown), enforces per-request TTFT/E2E timeout budgets, pins target GPUs. | `main.py`, `benchmark/launcher.py` |
+| **Scheduler configuration** | Admission/concurrency cap $M_{Seq}$ (`--max-num-seqs`) and chunked-prefill token budget (`--max-num-batched-tokens`). | `config/strategies.py` |
+
+**2. Serving backend.** vLLM as an OpenAI-compatible HTTP server, models served at their published fp16/bf16 checkpoints.
+
+**3. Evaluation & monitoring harness.**
+
+- **Measurement harness / request record.** An async replayer streams every request over SSE and retains the complete record for *every* request, including failures:
+  $\mathcal{R}_i = \big(t_i^{\text{req}}, \{t_i^{(k)}\}_{k=1}^{L_i}, L_i, s_i, e_i\big)$, with outcome $s_i \in$ {success, timeout, error}. KV-cache occupancy, running/waiting sequences and preemptions are polled from vLLM `/metrics`; GPU utilization, memory and power are sampled at 1 Hz via NVML.
+- **Metrics.** Derived directly from $\mathcal{R}_i$:
+
+  $$\mathrm{TTFT}_i = t_i^{(1)} - t_i^{\text{req}}, \qquad \mathrm{ITL}_i = \frac{1}{L_i - 1}\sum_{k=2}^{L_i}\big(t_i^{(k)} - t_i^{(k-1)}\big), \qquad \mathrm{E2E}_i = t_i^{(L_i)} - t_i^{\text{req}}$$
+
+  plus run-level decode throughput, energy efficiency, KV-cache occupancy, preemption count, speculative acceptance rate and SLO attainment.
+- **Validity protocol.** Three checks applied uniformly to every reported cell:
+  1. **KV-cache exhaustion** — configurations with failure rate $\rho_{\text{fail}} = N_{\text{failed}}/N_{\text{total}} > 0.30$ are excluded from quantitative fitting (but still reported).
+  2. **Timeout truncation** — requests that receive a first token but exceed the wall-clock budget are classified as truncated, not KV-exhausted.
+  3. **Cold-start transient** — each trace is replayed over multiple replicates after a fresh server launch; the first two replicates are a mandatory burn-in and are discarded.
+- **Statistical analysis.** Request-level (not per-workload-averaged) power-law fits $y = a x^{\gamma}$ via OLS on log-transformed data, reporting $\gamma$ with a 95% CI, $R^2$ and sample count, used descriptively to detect queueing-vs-length regime transitions.
+
+---
+
+## Workloads
+
+<p align="center">
+  <img src="docs/figures/fig2_workloads.png" alt="Joint input/output token distribution across real workloads" width="60%">
+</p>
+<p align="center"><em>Figure 2. Joint distribution of input and output token counts across the four real-world workloads.</em></p>
+
+| Task | Shape | Real-data loader (Hugging Face) | Workload names |
+|---|---|---|---|
+| Chat | short–medium prompts, moderate outputs, widest dispersion | `anon8231489123/ShareGPT_Vicuna_unfiltered` | `chat`, `chat_real`, `chat_real_long` |
+| Code generation | tight cluster of short prompts, brief completions | `google-research-datasets/mbpp` | `code`, `code_real` |
+| Summarization | prefill-heavy: long prompts, short outputs | `abisee/cnn_dailymail` | `summarization`, `summarization_real`, `summarization_real_long` |
+| Multi-step reasoning | moderate prompts, heavy-tailed CoT outputs up to $10^4$ tokens | `nvidia/OpenMathReasoning` | `reasoning`, `reasoning_real` |
+| Mixed | all four interleaved; cross-task KV-cache interference | all of the above | `mixed`, `mixed_real` |
+
+Synthetic workloads give precise control over input lengths but inflate speculative acceptance rates through textual repetition; the paper reports both forms to separate artifacts of prompt construction from findings that hold under natural traffic.
+
+## Models and Hardware (paper setup)
+
+| Model | Params | Precision | GPU |
+|---|---|---|---|
+| Llama-3.1-8B-Instruct | 8B | FP16 | NVIDIA V100-SXM2 32 GB |
+| Llama-2-13B-Chat | 13B | FP16 | NVIDIA L40S 48 GB |
+| Mistral-Nemo-12B-Instruct | 12B | BF16 | NVIDIA L40S 48 GB |
+| DeepSeek-R1-Distill-Qwen-7B | 7B | BF16 | NVIDIA V100-SXM2 32 GB |
+
+The paper holds tensor parallelism and precision fixed ($\pi = 1$, fp16/bf16) to isolate each mechanism's regime dependence; the harness additionally supports TP-2/TP-4, FP8/AWQ quantization and compound chunked + speculative configurations.
+
+---
+
+## Research Questions and Key Findings
+
+All results characterize a **colocated, single-engine vLLM deployment**, where prefill and decode share one scheduler, admission pool and GPU.
+
+### RQ1 — Cost separability: admission control relocates cost, it does not remove it
+
+TTFT is predictable from prompt length only when the concurrency cap leaves headroom ($M_{Seq} \ge 64$); below that, TTFT is governed by queueing delay ($\gamma \to 0$, $R^2 \approx 0$). With $M_{Seq} = 128$, E2E is cleanly driven by output length (decode fraction > 0.98, $\gamma \approx 1$). But the cap that keeps TTFT sub-150 ms produces the largest ITL degradation under load (mean ITL +65.8%, P95/mean jitter 1.12 → 2.42): a restrictive cap shifts the cost of high load from TTFT onto inter-token latency rather than eliminating it.
+
+### RQ2 — Chunked-prefill token budget: a zero-sum dial
+
+<p align="center">
+  <img src="docs/figures/fig6_chunked_prefill.png" alt="Chunked-prefill budget trade-off between TTFT and decode stall" width="100%">
+</p>
+<p align="center"><em>Figure 6. Responsiveness (TTFT P95), smoothness (decode stall), and the trade-off frontier at 16 req/s.</em></p>
+
+At 16 req/s a 256-token budget trades **13.9× higher TTFT P95** for **7.6× shorter decode stalls**, while E2E moves by less than 12%; no static budget dominates. The *beneficial direction* is set by the KV-cache pressure of the model's attention architecture, not by the workload: the same small budget weakly dominates the unchunked baseline on a high-KV-pressure (MHA) model.
+
+### RQ3 — n-gram speculative decoding: the acceptance-rate crossover is not universal
+
+<p align="center">
+  <img src="docs/figures/fig8_speculative.png" alt="Speculative decoding speedup vs acceptance rate" width="100%">
+</p>
+<p align="center"><em>Figure 8. (a) Throughput speedup vs. draft acceptance rate α on real prompts. (b) Drafted vs. accepted token throughput, ngram3 vs. ngram5.</em></p>
+
+At essentially the same acceptance rate ($\alpha \approx 0.5$), speculation gives **1.28–1.46×** throughput on Mistral-Nemo-12B and is **harmful (0.57–0.61×)** on Llama-3.1-8B. The crossover is a property of the model–hardware pair. Acceptance rate alone does not rank variants either: ngram3 beats ngram5 despite lower $\alpha$ because it drafts more tokens per second (coverage over precision). The main benefit is tail compression (p99 cut 2.5–2.6×), and the TTFT benefit only appears when the admission cap is tight enough for a queue to form.
+
+### RQ4 — Model architecture sensitivity: mechanisms transfer, operating points do not
+
+| Model (GPU) | RQ1 decode_frac range | RQ2 chunked-prefill trade-off | RQ3 spec. decoding TPS vs. baseline |
+|---|---|---|---|
+| Mistral-Nemo-12B (L40S) | 0.11 → 0.98 | zero-sum, no winner | 1.28×–1.46× |
+| Llama-2-13B (L40S) | 0.15 → 0.98, transfers | **C256 dominates B** | 1.25×–1.42×, same sign |
+| DeepSeek-7B (V100) | 0.12 → 0.20, transfers | harmful, matches Nemo | 1.18× |
+| Llama-3.1-8B (V100) | 0.11 → 0.25, transfers | harmful, matches Nemo | **0.57×–0.61×** |
+
+The queue-to-decode phase transition, the chunk-budget stall cap and the existence of an acceptance-rate crossover all reproduce across models; the sign of the chunked-prefill trade-off and every effect magnitude do not. KV-cache *capacity* pressure, not preemption count, governs the chunked-prefill sign flip.
+
+### RQ5 — SLO attainment and the trade-off frontier
+
+<p align="center">
+  <img src="docs/figures/fig10_slo.png" alt="SLO attainment in the token plane and versus load" width="100%">
+</p>
+<p align="center"><em>Figure 10. SLO attainment for Llama-2-13B on <code>mixed_real</code>: E2E boundary in the token plane, TTFT pass/fail, and attainment vs. offered load.</em></p>
+
+The E2E attainment boundary is governed by output length and recedes with load; TTFT attainment is not separable by prompt length at all ($R^2 = 0.002$). The two boundaries are near-orthogonal, so **conjunctive** TTFT ∧ E2E attainment is strictly lower than either marginal alone. Preemption inflates p95 decode stall up to 8.2× while remaining invisible to TTFT and E2E — latency-only reporting can score a preemption-thrashing configuration as healthy.
+
+---
+
+## Repository Structure
 
 ```
-InferenceBench/
-├── main.py                         Entry point and CLI orchestrator
-├── tui.py                          Interactive terminal UI (strategy/workload picker)
+STRATA-BENCH/
+├── main.py                       CLI entry point and experiment orchestrator
+├── tui.py                        Interactive terminal UI (model / strategy / workload / rate picker)
 ├── requirements.txt
-├── RESEARCH_OVERVIEW.md            Motivation, contributions, paper outline
 ├── config/
-│   ├── __init__.py
-│   ├── strategies.py               Strategy definitions + vLLM CLI arg builder
-│   └── workloads.py                Workload configs + Poisson/bursty trace generator
-└── benchmark/
-    ├── __init__.py
-    ├── launcher.py                 vLLM subprocess lifecycle (start, health-poll, teardown)
-    ├── runner.py                   Async trace replayer with SSE streaming + TTFT measurement
-    ├── gpu_monitor.py              Background GPU sampler (pynvml / nvidia-smi fallback)
-    ├── storage.py                  CSV + JSON persistence per run
-    └── analysis/
-        ├── __init__.py
-        ├── cost_model.py           Separability analysis, dominance pivot, GBT cost model fitting
-        └── report.py               Paper-quality figures (PDF) + LaTeX tables
+│   ├── strategies.py             Execution-strategy tuples + vLLM CLI argument builder
+│   └── workloads.py              Synthetic and real-data workloads, Poisson/bursty trace generator
+├── benchmark/
+│   ├── launcher.py               vLLM server lifecycle (launch, health-poll, teardown)
+│   ├── runner.py                 Async SSE trace replayer: TTFT / ITL / E2E per request
+│   ├── gpu_monitor.py            1 Hz NVML sampler (pynvml, nvidia-smi fallback)
+│   ├── storage.py                Per-run CSV + JSON persistence
+│   └── analysis/
+│       ├── cost_model.py         Separability / dominance analysis, cost-model fitting
+│       └── report.py             Figures (PDF) and LaTeX tables
+├── docs/figures/                 Figures from the paper used in this README
+└── RESEARCH_OVERVIEW.md          Early design notes that preceded the paper
 ```
 
-**Important:** the three `__init__.py` files (in `benchmark/`, `benchmark/analysis/`, and `config/`) are required for Python's package import resolution. They are intentionally empty — do not delete them.
-
----
-
-## Execution Strategy Space
-
-| Dimension | Options |
-|---|---|
-| Prefill mode | Full prefill, Chunked-256, Chunked-512, Chunked-1024 |
-| Tensor parallelism | TP-1, TP-2, TP-4 |
-| Speculative decoding | None, ngram-3, ngram-5 |
-| Quantization | fp16, fp8 |
-| Combinations | Chunked + speculation interaction |
-
-12 strategies defined (fractional factorial design).
-
-## Workload Space
-
-| Workload | Task type | Prompt lengths | Output lengths | Arrival pattern |
-|---|---|---|---|---|
-| `chat_poisson_low` | Chat | 128–1024 | 64–256 | Poisson λ=1.0 rps |
-| `chat_poisson_high` | Chat | 128–1024 | 64–256 | Poisson λ=4.0 rps |
-| `code_uniform` | Code generation | 256–2048 | 256–1024 | Uniform 1.5 rps |
-| `summarization_long_prompt` | Summarization | 2048–8192 | 128–512 | Poisson λ=0.5 rps |
-| `reasoning_bursty` | CoT reasoning | 256–1024 | 512–1024 | Bursty (8 req/burst) |
-| `mixed_all` | Mixed | 128–4096 | 64–1024 | Poisson λ=2.0 rps |
-
-## Metrics Collected Per Request
-
-- **TTFT** (Time to First Token) — via SSE streaming, millisecond resolution
-- **E2E latency** — full request completion time
-- **Tokens per second** — decode throughput
-- **KV cache utilization** — from vLLM Prometheus `/metrics`
-- **Preemption count** — number of KV evictions during the run
-- **GPU utilization, memory, power** — 1 Hz background sampling via pynvml
-
----
-
-## Hardware Requirements
-
-| Configuration | Supported strategies |
-|---|---|
-| 1 × GPU (≥16 GB VRAM) | All TP-1 strategies (10 of 12) |
-| 2 × GPU | All TP-1 + TP-2 strategies (11 of 12) |
-| 4 × GPU | Full strategy space including TP-4 |
-
-The launcher automatically skips strategies that require more GPUs than available.
-
-**VRAM guidance for Llama-3.1-8B at fp16, max context 8192:**
-- V100-32GB: supported (validated)
-- A100-40GB+: recommended for full strategy space
+The `__init__.py` files in `benchmark/`, `benchmark/analysis/` and `config/` are required for package imports; do not delete them.
 
 ---
 
 ## Installation
 
 ```bash
-# 1. Enter project root
-cd InferenceBench
+git clone https://github.com/farhoudjk/STRATA-BENCH.git
+cd STRATA-BENCH
 
-# 2. Create and activate a virtualenv
 python -m venv .venv
 source .venv/bin/activate
 
-# 3. Install benchmark dependencies
+# Benchmark dependencies
 pip install -r requirements.txt
 
-# 4. Install PyTorch matching your CUDA driver
-#    CUDA 12.1 / 12.2 (e.g. V100, A100 with driver 535.x):
-pip install torch==2.4.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+# vLLM (V1 engine) — install after requirements so transformers stays pinned.
+# vllm==0.11.0 pins torch==2.8.0 (CUDA 12.8 build); check `nvidia-smi` for your driver.
+pip install vllm==0.11.0
 
-#    CUDA 12.4+ (e.g. H100, A100 with driver 550+):
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
-
-# 5. Install vLLM and pin compatible transformers
-pip install vllm==0.6.0
-pip install "transformers==4.45.2" "tokenizers==0.20.3"
-
-# 6. Install TUI dependencies
-pip install questionary rich
-
-# 7. Log in to HuggingFace (required for gated models like Llama)
+# Required for gated models (e.g. Llama)
 huggingface-cli login
 
-# 8. Verify setup
-nvidia-smi
-python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"
-python -c "import vllm; print(vllm.__version__)"
+# Sanity check
+python -c "import torch, vllm; print(torch.cuda.is_available(), vllm.__version__)"
 python -c "from benchmark.runner import run_benchmark; print('imports OK')"
 ```
 
@@ -138,234 +194,129 @@ python -c "from benchmark.runner import run_benchmark; print('imports OK')"
 
 ## Running the Benchmark
 
-**All commands must be run from the project root** (the directory containing `main.py`).
+Run all commands from the repository root.
 
-### Interactive TUI — recommended for most use cases
+### Interactive TUI (recommended)
 
 ```bash
 python tui.py
 ```
 
-Walks you through selecting model, strategies, workloads, and GPU options with arrow-key menus, then launches the benchmark.
+Arrow-key menus for model, strategies, workloads, arrival rates/patterns and `max_num_seqs` sweeps.
 
-### CLI — single strategy × workload (sanity check, ~5 min)
+### Single strategy × workload (smoke test)
 
 ```bash
 python main.py \
-  --model meta-llama/Llama-3.1-8B-Instruct \
+  --model mistralai/Mistral-Nemo-Instruct-2407 \
   --strategy baseline_full_fp16_tp1 \
-  --workload chat_poisson_low
+  --workload mixed_real \
+  --rates low
 ```
 
-### CLI — ablation over one dimension (~1–2 hours per dimension)
+### RQ1 — admission cap × rate × arrival pattern
 
 ```bash
-# Prefill mode ablation
-python main.py \
-  --model meta-llama/Llama-3.1-8B-Instruct \
-  --dimension chunked_prefill \
-  --workload chat_poisson_high
-
-# Speculation ablation
-python main.py \
-  --model meta-llama/Llama-3.1-8B-Instruct \
-  --dimension speculation \
-  --workload reasoning_bursty
-
-# Available dimensions: chunked_prefill | tensor_parallel | speculation | quantization | interaction
+for seqs in 16 32 64 128; do
+  python main.py \
+    --model mistralai/Mistral-Nemo-Instruct-2407 \
+    --strategy baseline_full_fp16_tp1 \
+    --workload mixed_real \
+    --rates low med high vhigh \
+    --arrival-patterns poisson bursty \
+    --max-num-seqs-override $seqs
+done
 ```
 
-### CLI — multiple workloads in one run
+### RQ2 / RQ3 — ablation over one dimension
 
 ```bash
-python main.py \
-  --model meta-llama/Llama-3.1-8B-Instruct \
-  --dimension chunked_prefill \
-  --workloads chat_poisson_low chat_poisson_high summarization_long_prompt
+# Chunked-prefill token budget (baseline vs. 256 / 512 / 1024)
+python main.py --model <model> --dimension chunked_prefill \
+  --workload mixed_real --rates low med high vhigh
+
+# n-gram speculative decoding (baseline vs. ngram3 / ngram5)
+python main.py --model <model> --dimension speculation \
+  --workload mixed_real --rates low med high vhigh --arrival-patterns poisson bursty
 ```
 
-### CLI — full benchmark (all strategies × all workloads, ~8–12 hours)
+Available dimensions: `chunked_prefill | tensor_parallel | speculation | quantization | interaction`.
+
+### Full grid and report regeneration
 
 ```bash
-python main.py \
-  --model meta-llama/Llama-3.1-8B-Instruct \
-  --run-all \
-  --gpu-indices 0         # single GPU
-  # --gpu-indices 0,1     # two GPUs
+python main.py --model <model> --run-all --gpu-indices 0
+python main.py --model placeholder --report-only --run-id <run_id>
 ```
 
-### Regenerate report from existing results
+For models with a native context shorter than 8192 tokens (e.g. Llama-2: 4096), add `--max-model-len-override 4096`.
 
-```bash
-python main.py \
-  --model placeholder \
-  --report-only \
-  --run-id 20260615_154412
-```
-
----
-
-## CLI Reference
+### CLI Reference
 
 | Argument | Default | Description |
 |---|---|---|
-| `--model` | required | HuggingFace model ID or local path |
-| `--results-dir` | `results/` | Root directory for all output |
-| `--run-id` | timestamp | Identifier for this run |
+| `--model` | required | Hugging Face model ID or local path |
+| `--run-all` / `--strategy` / `--dimension` / `--report-only` | — | Execution mode (mutually exclusive, one required) |
+| `--workload`, `--workloads` | `chat` | One or more workload names |
+| `--rates` | `low` | `low` (2) · `med` (4) · `high` (8) · `vhigh` (16) req/s |
+| `--arrival-patterns` | `poisson` | `poisson`, `bursty` |
+| `--max-num-seqs-override` | — | Admission cap $M_{Seq}$ |
+| `--max-model-len-override` | — | Override context length (default 8192) |
+| `--num-requests` | per workload | Override requests per trace |
+| `--max-concurrent` | `16` | Client-side in-flight request limit |
+| `--request-timeout` | `300` | Per-request E2E budget (s) |
+| `--ttft-timeout` | `120` | Abort if no first token within this many seconds |
 | `--gpu-indices` | `0` | Comma-separated GPU indices |
 | `--port` | `8100` | vLLM server port |
-| `--max-concurrent` | `32` | Max in-flight requests |
-| `--request-timeout` | `300` | Per-request timeout (seconds) |
-| `--seed` | `42` | Reproducibility seed |
-| `--no-gpu-monitor` | off | Disable GPU sampling |
-| `--extra-vllm-args` | — | Additional args forwarded to vLLM |
-
-**Execution mode (mutually exclusive, one required):**
-
-| Flag | Description |
-|---|---|
-| `--run-all` | All 12 strategies × all 6 workloads |
-| `--strategy <name>` | Single named strategy |
-| `--dimension <name>` | Ablation group for one dimension |
-| `--report-only` | Report generation only (requires `--run-id`) |
+| `--seed` | `42` | Trace seed |
+| `--results-dir` / `--run-id` | `results/` / timestamp | Output location |
+| `--no-gpu-monitor`, `--debug`, `--extra-vllm-args` | — | Monitoring, logging, passthrough vLLM args |
 
 ---
 
-## Output Structure
+## Output
 
 ```
-results/
-└── {run_id}/
-    ├── requests.csv              Per-request metrics (TTFT, E2E, TPS, KV cache %, preemptions)
-    ├── gpu_samples.csv           1 Hz GPU utilization / memory / power samples
-    ├── summary.json              P50/P95/P99 aggregates per strategy × workload
-    ├── vllm_{strategy}.log       vLLM server logs per strategy
-    ├── figures/
-    │   ├── ttft_cdf.pdf          TTFT CDF by strategy
-    │   ├── dominance_heatmap.pdf Best strategy per (prompt_len, output_len) regime
-    │   ├── ttft_boxplot.pdf      TTFT distribution comparison
-    │   ├── e2e_boxplot.pdf       E2E distribution comparison
-    │   ├── kv_cache_vs_ttft.pdf  KV pressure vs. TTFT scatter
-    │   └── tps_by_output_length.pdf  Decode throughput vs. output length
-    ├── tables/
-    │   ├── summary.tex           LaTeX table: latency + throughput per strategy
-    │   └── interactions.tex      LaTeX table: improvement vs. baseline
-    └── analysis/
-        ├── dominance.csv         P95 pivot: strategy × (prompt_bucket, output_bucket)
-        ├── interactions.csv      Per-strategy improvement relative to baseline
-        └── separability.json     R² for prompt-only / output-only / combined feature sets
+results/{run_id}/
+├── requests.csv        One row per request: TTFT, E2E, ITL mean/p50/p95/max, TPS, status/error,
+│                       completion ratio, KV-cache %, running/waiting seqs, preemptions,
+│                       speculative acceptance rate, rate/pattern/max_num_seqs metadata
+├── gpu_samples.csv     1 Hz GPU utilization, memory, power, temperature
+├── summary.json        P50/P95/P99 aggregates per strategy × workload × rate
+├── vllm_{strategy}.log Server logs
+├── figures/            TTFT CDF, dominance heatmap, latency boxplots, KV-pressure scatter, ...
+├── tables/             LaTeX summary / efficiency / interaction tables
+└── analysis/           Dominance pivot, interactions, separability (R²) results
 ```
+
+The complete per-request measurement corpus and analysis scripts used for every figure and table in the paper are archived at **[Zenodo 21302857](https://zenodo.org/records/21302857)**.
 
 ---
 
-## Troubleshooting
+## Scope and Limitations
 
-**`ModuleNotFoundError: No module named 'benchmark'`**  
-Run from the project root, and ensure the three `__init__.py` files exist:
-```bash
-touch benchmark/__init__.py benchmark/analysis/__init__.py config/__init__.py
-```
-
-**`ModuleNotFoundError: No module named 'vllm'` in vLLM subprocess log**  
-The vLLM subprocess inherits `sys.executable` from the calling Python. Make sure you activated the correct virtualenv before running:
-```bash
-source .venv/bin/activate
-python main.py ...
-```
-
-**`RuntimeError: The NVIDIA driver on your system is too old`**  
-PyTorch was built for a newer CUDA than your driver supports. Install the matching PyTorch wheel:
-```bash
-# Check your driver's max CUDA version
-nvidia-smi | head -3
-# Then install the right wheel (e.g. cu121 for CUDA 12.1/12.2)
-pip install torch==2.4.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
-```
-
-**`ValueError: Bfloat16 is only supported on GPUs with compute capability >= 8.0`**  
-V100 and older GPUs (compute capability 7.x) do not support bfloat16. The strategy definitions default to `float16` which is correct — if you see this error, check that your `config/strategies.py` has `dtype="float16"` in the `Strategy` dataclass default.
-
-**`AttributeError: TokenizersBackend has no attribute all_special_tokens_extended`**  
-`transformers` version is too new for vLLM 0.6.0. Pin compatible versions:
-```bash
-pip install "transformers==4.45.2" "tokenizers==0.20.3"
-```
-
-**`api_server.py: error: unrecognized arguments: --no-enable-log-requests`**  
-Wrong flag for your vLLM version. vLLM 0.6.x uses `--disable-log-requests`. This is set automatically in `config/strategies.py` — make sure you are on vLLM 0.6.0.
-
-**vLLM starts but SM utilization stays at 0% in nvtop**  
-This is normal during startup — the model is loaded into VRAM but no requests have arrived yet. Once the benchmark runner begins sending requests you will see SM utilization rise to 80–95%.
-
-**`OSError: libcudart.so.13: cannot open shared object file`**  
-`torchaudio` was built for a different CUDA version than torch. Reinstall to match:
-```bash
-pip install torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu121
-```
-
----
-
-## Adding a New Strategy
-
-In `config/strategies.py`, add an entry to `STRATEGIES`:
-
-```python
-"my_new_strategy": Strategy(
-    name="my_new_strategy",
-    tensor_parallel_size=1,
-    enable_chunked_prefill=True,
-    chunked_prefill_size=512,
-    enable_speculation=True,
-    ngram_prompt_lookup_max=3,
-    num_speculative_tokens=5,
-    dtype="float16",
-),
-```
-
-Then add it to the relevant ablation group in `get_strategies_for_dimension()` if applicable.
-
----
-
-## Adding a New Workload
-
-In `config/workloads.py`, add an entry to `WORKLOADS`:
-
-```python
-"my_workload": WorkloadConfig(
-    name="my_workload",
-    task_type=TaskType.CODE,
-    prompt_lengths=[512, 1024, 2048],
-    output_lengths=[256, 512],
-    arrival_pattern=ArrivalPattern.POISSON_HIGH,
-    num_requests=200,
-    target_rps=3.0,
-),
-```
-
----
-
-## Validated Environment
-
-| Component | Version | Notes |
-|---|---|---|
-| Python | 3.12 | 3.10 / 3.11 also supported |
-| vLLM | 0.6.0 | Pin to this version |
-| PyTorch | 2.4.0+cu121 | Match to your CUDA driver |
-| transformers | 4.45.2 | Must pin — newer versions incompatible with vLLM 0.6.0 |
-| tokenizers | 0.20.3 | Must pin alongside transformers |
-| CUDA driver | 535.x (CUDA 12.2) | V100-SXM2-32GB validated |
-| GPU | Tesla V100-32GB | A100 / H100 / L40S also supported |
+- Results characterize **colocated, single-engine** serving; prefill/decode disaggregation or multi-GPU serving changes the contention structure and requires re-measurement.
+- Speculative-decoding findings cover the **n-gram lookup** variant only, not drafter/verifier methods.
+- Effects found to be model–hardware properties should be re-measured on a new deployment — that is the intended use of this harness.
 
 ---
 
 ## Citation
 
 ```bibtex
-@inproceedings{llm_exec_benchmark_2027,
-  title     = {Compiler-Inspired Execution Planning for LLM Request Dispatch},
-  author    = {<authors>},
-  booktitle = {Proceedings of the 49th International Conference on Software Engineering (ICSE)},
-  year      = {2027}
+@article{jafarikaleibar2026stratabench,
+  author    = {Jafari Kaleibar, Farhoud and Ji, Honggeun and Zaki, Amr M. and Litoiu, Marin},
+  title     = {{STRATA-Bench}: A Regime-Aware Benchmark of Execution Strategy Efficiency in {LLM} Serving},
+  journal   = {Proceedings of the ACM on Measurement and Analysis of Computing Systems},
+  volume    = {10},
+  number    = {3},
+  articleno = {080},
+  numpages  = {30},
+  year      = {2026},
+  month     = dec,
+  publisher = {Association for Computing Machinery},
+  doi       = {10.1145/3857383},
+  url       = {https://doi.org/10.1145/3857383}
 }
 ```
 
@@ -373,4 +324,4 @@ In `config/workloads.py`, add an entry to `WORKLOADS`:
 
 ## License
 
-MIT
+Code: MIT. The paper is published under a Creative Commons Attribution 4.0 International License; figures in `docs/figures/` are reproduced from it.
