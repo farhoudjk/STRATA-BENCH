@@ -17,7 +17,7 @@ E2E = end-to-end latency. Percentiles cover finished requests only.
 | Graceful degradation (MHA model) | vLLM | TensorRT-LLM | §5 |
 | E2E on uniform traffic | TensorRT-LLM | SGLang | §6 |
 | Gain from prefix caching | tie | — | §7 |
-| Gain from chunked prefill (long prompts) | TensorRT-LLM | SGLang | §8 |
+| Gain from chunked prefill (long prompts) | TensorRT-LLM (vLLM: smoothness only) | SGLang | §8 |
 | Gain from n-gram speculation | vLLM | TensorRT-LLM | §9 |
 | Observability | vLLM | TensorRT-LLM | §11 |
 
@@ -125,17 +125,22 @@ Reported hit rates differ 3×, but the latency benefit is nearly identical. The 
 define "hit rate" differently (token vs block granularity, cumulative vs windowed).
 **Compare caching by its latency effect, never by engine-reported hit rate.**
 
-## 8. Chunked prefill is engine-specific, and vLLM pays for it in decode
+## 8. Chunked prefill is engine-specific: it smooths streaming on vLLM and TensorRT-LLM, hurts SGLang
 RQ2, chat_real_long (long prompts), prefix caching on, no chunking → 512-token chunks:
 
-| Engine | TTFT p95 | E2E p50 | ITL p50 |
-|---|---|---|---|
-| TRT-LLM | 80.0 → **69.3 s** (−13%) | 38.5 → **34.1 s** (−11%) | 60.4 → 65.8 ms |
-| vLLM | 83.0 → 80.2 s (−3%) | 42.0 → 39.3 s | 65.1 → **83.9 ms (+29%)** |
-| SGLang | 79.3 → 88.9 s (**+12%**) | 41.6 → 46.7 s (+12%) | 61.6 → 62.3 ms |
+| Engine | TTFT p95 | TPOT p95 | Longest gap p95 | E2E p50 |
+|---|---|---|---|---|
+| TRT-LLM | 80.0 → **69.3 s** (−13%) | 99.6 → **83.9 ms** (−16%) | 1.02 → **0.12 s** (−88%) | 38.5 → **34.1 s** (−11%) |
+| vLLM | 83.0 → 80.2 s (−3%) | 118.5 → **99.7 ms** (−16%) | 1.11 → **0.31 s** (−73%) | 42.0 → 39.3 s (−7%) |
+| SGLang | 79.3 → 88.9 s (**+12%**) | 113.5 → 127.7 ms (+12%) | 4.11 → 6.12 s (+49%) | 41.6 → 46.7 s (+12%) |
 
-Only TensorRT-LLM gains on every metric. vLLM gains a little TTFT but its decode slows by
-29% (prefill chunks share iterations with decodes). SGLang gets worse.
+TensorRT-LLM gains on every metric; vLLM gains mainly in streaming smoothness; SGLang gets worse
+on every metric.
+
+**Correction.** An earlier version of this note said chunking slows vLLM's decode by 29%. That
+used the per-request median gap between streamed chunks (ITL p50), which rises because chunked
+iterations are more frequent and smaller, not because tokens arrive more slowly. TPOT, which is
+robust to chunk size, shows vLLM's decode improves (p95 −16%).
 
 ## 9. N-gram speculation helps vLLM, barely helps SGLang, hurts TensorRT-LLM
 RQ3, max_num_seqs 64, E2E median, baseline → n-gram (k=3):

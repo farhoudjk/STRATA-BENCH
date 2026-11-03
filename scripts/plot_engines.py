@@ -217,7 +217,8 @@ def _pct(a, b):
 
 
 def e5_features(r2, r3, out):
-    ok2, ok3 = r2[r2.status == "ok"], r3[r3.status == "ok"]
+    ok2, ok3 = r2[(r2.status == "ok") & (r2.output_tokens > 1)].copy(), r3[r3.status == "ok"]
+    ok2["tpot_ms"] = (ok2.e2e_s - ok2.ttft_s) / (ok2.output_tokens - 1) * 1000  # robust to tokens per chunk
 
     def q(d, strat, wl, col, fn, extra=None):
         g = d[(d.strategy_name == strat) & (d.workload_name == wl)]
@@ -234,9 +235,9 @@ def e5_features(r2, r3, out):
         ("Chunked prefill → TTFT p95\nchat_real_long",
          q(ok2, "baseline_full_fp16_tp1", "chat_real_long", "ttft_s", p95),
          q(ok2, "chunked_512_fp16_tp1", "chat_real_long", "ttft_s", p95)),
-        ("Chunked prefill → decode ITL p50\nchat_real_long",
-         q(ok2, "baseline_full_fp16_tp1", "chat_real_long", "itl_p50_ms", "median"),
-         q(ok2, "chunked_512_fp16_tp1", "chat_real_long", "itl_p50_ms", "median")),
+        ("Chunked prefill → TPOT p95\nchat_real_long",
+         q(ok2, "baseline_full_fp16_tp1", "chat_real_long", "tpot_ms", p95),
+         q(ok2, "chunked_512_fp16_tp1", "chat_real_long", "tpot_ms", p95)),
         ("N-gram spec. → E2E p50\nchat_multiturn",
          q(ok3, "baseline_full_fp16_tp1", "chat_multiturn", "e2e_s", "median", seqs64),
          q(ok3, "spec_ngram3_fp16_tp1", "chat_multiturn", "e2e_s", "median", seqs64)),
