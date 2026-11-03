@@ -62,6 +62,10 @@ around four research questions:
 
 \paragraph{Contributions.}
 \begin{enumerate}
+  \item \sysname, a black-box benchmark for LLM serving engines with a formal definition of
+  experiments, arrival-based latency metrics, censoring of timed-out requests, and SLO goodput.
+  Engines, models, workloads, and arrival processes are parameters, so practitioners can evaluate
+  their own deployment (\cref{sec:method}).
   \item A controlled, multi-metric comparison of three production LLM serving engines under
   load, covering latency, streaming quality, throughput, reliability, and SLO goodput
   (\cref{sec:results}).
@@ -74,7 +78,8 @@ around four research questions:
 \end{enumerate}
 
 The remainder of the paper is organised as follows. \Cref{sec:background} summarises the
-serving mechanisms that matter for our results. \Cref{sec:method} describes the harness,
-engines, models, workloads, and metrics. \Cref{sec:results} answers the research questions.
+serving mechanisms that matter for our results. \Cref{sec:method} defines the benchmark
+and its metrics, and \cref{sec:setup} instantiates it for this study. \Cref{sec:results} answers
+the research questions.
 \Cref{sec:discussion} discusses implications for practitioners and for benchmarking,
 \cref{sec:threats} threats to validity, and \cref{sec:related} related work.

@@ -1,0 +1,139 @@
+\section{Experimental Setup}
+\label{sec:setup}
+
+This section instantiates the benchmark of \cref{sec:method} for the four research questions.
+
+\subsection{Engines and platforms}
+\label{sec:engines}
+
+\Cref{tab:engines} lists the engines and platforms. All engines serve fp16 weights on one GPU
+(no tensor parallelism) with a maximum context of 8{,}192 tokens. The scheduler limit $S$ maps to
+each engine's equivalent setting. \todo{list the per-engine flags: KV memory fraction, maximum
+batched tokens, maximum running requests, maximum batch size, and the capacity-scheduler policy}
+Two engine-specific adjustments were necessary. \trt treats the chunk size as a hard prompt-length
+limit unless chunked prefill is enabled explicitly, so the chunked-prefill configuration sets that
+flag. \trt's n-gram speculation is incompatible with its overlap scheduler, which we disable
+whenever speculation is on; \sglang disables its equivalent optimisation automatically and caps
+running requests at 48 under speculation.
+
+\begin{table}[t]
+  \caption{Engines and platforms.}
+  \label{tab:engines}
+  \small
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    & L40S (\rqref{1}--\rqref{3}) & GB10 (\rqref{4}) \\
+    \midrule
+    \vllm (V1) & 0.11.0 & 0.32.0 \\
+    \sglang & \verify{version} & 0.5.22 \\
+    \trt (PyTorch) & 1.0.0 & 1.2.1 \\
+    \midrule
+    Memory & 44.4\,GiB & 121\,GiB unified \\
+    KV memory fraction & 0.90 \verify{} & 0.80 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Models}
+\label{sec:models}
+
+We choose three instruction-tuned models whose per-token KV footprint
+$2 L H_{kv} d b$ (\cref{eq:kvcap}) spans a wide range (\cref{tab:models}).
+Qwen1.5-14B-Chat~\cite{bai2023qwen} has no KV-head reduction ($H_{kv}=40$) and needs $5\times$ the
+cache per token of Mistral-NeMo-12B and $6.25\times$ that of Llama-3.1-8B~\cite{dubey2024llama3}.
+We considered distilled reasoning models but rejected them after confirming from their
+configuration files that they use GQA backbones, which would not provide the contrast.
+
+\begin{table}[t]
+  \caption{Models. KV bytes per token at fp16.}
+  \label{tab:models}
+  \small
+  \begin{tabular}{@{}llrrr@{}}
+    \toprule
+    Model & Attn. & $H_{kv}$ & $L$ & KV B/token \\
+    \midrule
+    Llama-3.1-8B-Instruct & GQA & 8 & 32 & 131{,}072 \\
+    Mistral-NeMo-12B-Instr.~\cite{mistralnemo} & GQA & 8 & 40 & 163{,}840 \\
+    Qwen1.5-14B-Chat & MHA & 40 & 40 & 819{,}200 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Prompt formatting.}
+The client sends plain instruction text to the completions endpoint. Qwen1.5-14B-Chat emits its
+end-of-turn token immediately on unformatted prompts, so for this model the client applies the
+model's chat template at send time. \todo{decide whether to template all models; see
+\cref{sec:threats}}
+
+\subsection{Workloads}
+\label{sec:workloads}
+
+We instantiate three workloads from public corpora (\cref{tab:workloads}).
+\texttt{mixed\_real} is a mixture (\cref{eq:workload}) of four tasks with $\pi_k = 1/4$: chat
+(ShareGPT~\cite{sharegpt}), code generation (MBPP~\cite{austin2021mbpp}), reasoning
+(GSM8K~\cite{cobbe2021gsm8k}), and summarisation (CNN/DailyMail~\cite{hermann2015cnn}). It pairs
+short prompts with very long output budgets (reasoning) and long prompts with short outputs
+(summarisation), so a few long-running requests can hold scheduler slots and KV memory for
+minutes. \texttt{chat\_multiturn} replays ShareGPT conversations of two to six turns.
+\texttt{chat\_real\_long} uses single-turn ShareGPT prompts of at least 500 tokens; prompts longer
+than the context (1\%) are rejected by the client and excluded.
+
+\begin{table}[t]
+  \caption{Workloads per run (token counts are medians).}
+  \label{tab:workloads}
+  \footnotesize
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}llrrr@{}}
+    \toprule
+    Workload & Task (source) & Req. & $p_i$ & $m_i$ \\
+    \midrule
+    \multirow{4}{*}{\texttt{mixed\_real}}
+      & chat (ShareGPT) & 125 & 20 & 239 \\
+      & code (MBPP) & 125 & 53 & 45 \\
+      & reasoning (GSM8K) & 125 & 85 & 6{,}810 \\
+      & summ.\ (CNN/DM) & 125 & 791 & 64 \\
+    \texttt{chat\_multiturn} & 2--6 turns (ShareGPT) & 280--600 & 454 & 310 \\
+    \texttt{chat\_real\_long} & $\geq$500 tok.\ (ShareGPT) & 300 & 938 & \verify{} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Load and measurement parameters}
+\label{sec:params}
+
+Arrival processes are Poisson with $\lambda \in \{2, 4, 8, 16\}$ requests/s and bursty with
+$B = 10$, $\delta = 50$\,ms, $T_B = 5$\,s. The client concurrency limit is $C \in \{16, 256\}$
+and the scheduler limit $S \in \{64, 256\}$. Timeouts are $\tau_1 = 300$\,s and $\tau_2 = 600$\,s.
+Engine metrics are polled every $\Delta t$ \verify{} seconds. We evaluate goodput (\cref{eq:goodput})
+at a \emph{strict} target $(T^\star, P^\star) = (2\,\mathrm{s}, 200\,\mathrm{ms})$ and a
+\emph{relaxed} target $(4\,\mathrm{s}, 500\,\mathrm{ms})$, representative of interactive chat.
+\todo{state warm-up policy and inter-run cool-down}
+
+\subsection{Experimental design}
+\label{sec:design}
+
+\Cref{tab:design} lists the experiments per research question. Every configuration is run with
+all three engines and all five arrival processes.
+
+\begin{table}[t]
+  \caption{Experimental design.}
+  \label{tab:design}
+  \small
+  \begin{tabular}{@{}lp{6.1cm}@{}}
+    \toprule
+    RQ & Configurations \\
+    \midrule
+    \rqref{1} & 3 models; \texttt{mixed\_real}, \texttt{chat\_multiturn}; $C \in \{16, 256\}$
+    (256 only for Qwen1.5); $S \in \{64, 256\}$; $\phi = \varnothing$ \\
+    \rqref{2} & Mistral-NeMo; \texttt{chat\_multiturn}, \texttt{chat\_real\_long}; $C = S = 256$;
+    $\phi \in \{\varnothing, \{\textsc{prefix}\}, \{\textsc{chunk}(512)\},$
+    $\{\textsc{prefix}, \textsc{chunk}(512)\}\}$ \\
+    \rqref{3} & Mistral-NeMo; \texttt{mixed\_real}, \texttt{chat\_multiturn}; $C = 256$;
+    $S \in \{32, 64\}$; $\phi \in \{\varnothing, \{\textsc{spec}(3)\}\}$ (n-gram) \\
+    \rqref{4} & \rqref{1} protocol on GB10 with $C = 256$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+In total the study comprises \todo{count} runs and \todo{count} requests on the L40S, and 180 runs
+and 72{,}000 requests on the GB10. Each configuration is run once.

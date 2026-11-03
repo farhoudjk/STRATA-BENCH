@@ -1,187 +1,196 @@
-\section{Methodology}
+\section{Benchmark Methodology}
 \label{sec:method}
 
-\subsection{Benchmark harness}
-\label{sec:harness}
+\sysname is a black-box benchmark for LLM serving engines. It is defined independently of any
+particular engine, model, workload, or hardware: each is a parameter of an experiment, so
+practitioners can evaluate the deployment they care about. This section formalises the benchmark;
+\cref{sec:setup} instantiates it for this study.
 
-\sysname is an asynchronous Python client that drives each engine through its own
-OpenAI-compatible \texttt{/v1/completions} endpoint with streaming enabled, so every engine is
-measured through the interface applications use, including its HTTP frontend and tokenizer.
-For each request the harness records the dispatch time, the arrival time of every streamed
-chunk, the number of output tokens, and the final status. In parallel it polls each engine's
-native metrics endpoint (Prometheus \texttt{/metrics} for \vllm and \sglang, a JSON statistics
-endpoint for \trt) for KV-cache occupancy, running and waiting sequence counts, preemption
-counters, and prefix-cache hit rates.
+\begin{figure*}[t]
+  \centering
+  \IfFileExists{figures/methodology.pdf}{%
+    \includegraphics[width=0.92\textwidth]{figures/methodology.pdf}%
+  }{\IfFileExists{figures/methodology.jpg}{%
+    \includegraphics[width=0.92\textwidth]{figures/methodology.jpg}%
+  }{%
+    \fbox{\parbox[c][4.2cm][c]{0.9\textwidth}{\centering\small
+      Methodology overview figure: place it at \texttt{figures/methodology.pdf}}}%
+  }}
+  \caption{Overview of \sysname. A benchmark configuration (workload, load generation, model,
+  scheduler configuration) is executed by the experiment orchestrator against each serving engine.
+  The evaluation and monitoring harness measures every request from the client side, polls the
+  engine's own metrics, and applies a validity protocol; the statistical analysis derives the
+  reported distributions, SLO goodput, and feature effects.}
+  \label{fig:overview}
+\end{figure*}
+
+\Cref{fig:overview} shows the four stages of the benchmark. An \emph{experiment} is the tuple
+\begin{equation}
+  \mathcal{E} = (\mathcal{W}, \mathcal{A}, C, M, e, \theta, h),
+  \label{eq:experiment}
+\end{equation}
+of a workload $\mathcal{W}$, an arrival process $\mathcal{A}$ with client concurrency limit $C$,
+a model $M$, a serving engine $e$ with scheduler configuration $\theta$, and a hardware platform
+$h$. The first five define the benchmark configuration (\cref{sec:config}); $e$ is the system
+under test (\cref{sec:engines-bb}); the harness (\cref{sec:harness}) and the analysis
+(\cref{sec:analysis}) are the same for every experiment.
+
+%% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Benchmark configuration}
+\label{sec:config}
+
+\paragraph{Workloads.}
+A request $r_i = (\mathbf{x}_i, m_i, \kappa_i)$ consists of a prompt $\mathbf{x}_i$ of
+$p_i = |\mathbf{x}_i|$ tokens, a maximum output length $m_i$, and a task label $\kappa_i$.
+A workload is a mixture of $K$ task distributions,
+\begin{equation}
+  \mathcal{W} = \sum_{k=1}^{K} \pi_k \, \mathcal{D}_k, \qquad \sum_{k} \pi_k = 1,
+  \label{eq:workload}
+\end{equation}
+where $\mathcal{D}_k$ draws prompts and output budgets from a corpus for task $k$. A
+\emph{conversational} workload groups requests into conversations $c$ with turns
+$r_{c,1}, \dots, r_{c,J_c}$, where the prompt of turn $j$ contains the full history, so
+$\mathbf{x}_{c,j-1}$ is a prefix of $\mathbf{x}_{c,j}$. Mixtures with heterogeneous $p_i$ and $m_i$
+stress scheduling, conversational workloads stress prefix reuse, and long-prompt workloads stress
+prefill.
 
 \paragraph{Load generation.}
-Arrival times are generated in advance and requests are released open-loop, independent of
-completions~\cite{schroeder2006open}. We use four Poisson processes (2, 4, 8, and 16 requests/s)
-and one bursty process (10 requests 50\,ms apart, every 5\,s). A client-side semaphore caps the
-number of in-flight requests (\emph{client concurrency}, 16 or 256). For multi-turn
-conversations, a turn is released only after the previous turn of the same conversation
-completes, as a real user would; conversations are interleaved open-loop.
+The arrival process $\mathcal{A}$ assigns every request an arrival time $a_i$ before the run,
+independently of the system's responses (open loop~\cite{schroeder2006open}). We use two
+families: a Poisson process of rate $\lambda$, with $a_{i+1} - a_i \sim \mathrm{Exp}(\lambda)$, and a
+bursty process that releases $B$ requests, $\delta$ apart, every $T_B$ seconds; any point process
+can be substituted. The client keeps at most $C$ requests in flight, so request $i$ is
+\emph{dispatched} at
+\begin{equation}
+  s_i = \inf\{\, t \ge a_i : n_{\mathrm{inflight}}(t) < C \,\},
+  \label{eq:dispatch}
+\end{equation}
+and $q_i = s_i - a_i \ge 0$ is the time it waits at the client. Within a conversation, turn $j > 1$
+is released only after turn $j-1$ finishes at $f_{c,j-1}$, i.e., $s_{c,j} \ge f_{c,j-1}$, as a
+user waits for an answer; conversations themselves arrive open-loop.
 
-\paragraph{Isolation.}
-Each rate configuration runs against a freshly launched server, so caches and counters start
-empty. \todo{state warm-up policy and inter-run cool-down} Requests that receive no first token
-within 300\,s, or do not finish within 600\,s, are recorded as timeouts.
+\paragraph{Models.}
+A model enters the benchmark through its weights, tokenizer, and chat template, and through its
+key--value (KV) footprint. With $L$ layers, $H_{kv}$ KV heads of dimension $d$, and $b$ bytes per
+element, each token occupies $2 L H_{kv} d b$ bytes of KV cache, so $\beta$ bytes of cache memory
+hold
+\begin{equation}
+  K = \left\lfloor \frac{\beta}{2 \, L \, H_{kv} \, d \, b} \right\rfloor \text{ tokens}.
+  \label{eq:kvcap}
+\end{equation}
+A running request occupies $p_i + g_i(t)$ of these after generating $g_i(t)$ tokens. Models with
+grouped-query attention (small $H_{kv}$) leave far more room than models with full multi-head
+attention.
 
-\subsection{Engines}
-\label{sec:engines}
+\paragraph{Scheduler configuration.}
+The engine configuration $\theta = (S, \phi)$ comprises the scheduler's limit $S$ on concurrently
+running sequences and a set of optional features
+\begin{equation}
+  \phi \subseteq \{\textsc{prefix},\ \textsc{chunk}(c),\ \textsc{spec}(k)\}:
+  \label{eq:features}
+\end{equation}
+prefix caching, chunked prefill with chunk size $c$, and speculative decoding with $k$ draft
+tokens. All other options keep
+the engine's defaults and are recorded with each run. Concurrency is therefore bounded by $S$ and by
+$K$. By Little's law~\cite{little1961}, the mean number of requests in the system is
+$\bar{N} = \lambda \bar{R}$ for mean residence time $\bar{R}$: the scheduler limit binds when
+$\lambda \bar{R} > S$, and the KV pool binds when the tokens of running requests reach $K$.
+Which limit binds first, and what an engine does when it binds, is what the benchmark exposes.
 
-\Cref{tab:engines} lists the engines and versions. All engines serve fp16 weights on one GPU
-(tensor parallelism 1) with a maximum context of 8{,}192 tokens. The scheduler's sequence
-limit (\texttt{max\_num\_seqs}) is set to 64 or 256 and mapped to each engine's equivalent
-setting. \todo{list the per-engine flags: KV memory fraction, maximum batched tokens,
-maximum running requests, maximum batch size, and the capacity-scheduler policy}
-Two engine-specific adjustments were necessary. First, \trt treats the chunk size as a hard
-prompt-length limit unless chunked prefill is enabled explicitly, so the chunked-prefill
-strategy sets this flag. Second, \trt's n-gram speculation is incompatible with its overlap
-scheduler, which we therefore disable whenever n-gram speculation is on; \sglang disables its
-equivalent optimisation automatically and caps running requests at 48 when speculation is on.
+\paragraph{Experiment orchestrator.}
+The orchestrator expands a configuration grid into experiments (\cref{eq:experiment}), launches a
+fresh server for each so that caches and counters start empty, waits until the server reports
+ready, replays the trace, collects the measurements, and shuts the server down before the next
+experiment. Every experiment's full configuration and the engine's launch log are stored with its
+results.
 
-\begin{table}[t]
-  \caption{Engines and platforms.}
-  \label{tab:engines}
-  \small
-  \begin{tabular}{@{}lll@{}}
-    \toprule
-    & L40S (\rqref{1}--\rqref{3}) & GB10 (\rqref{4}) \\
-    \midrule
-    \vllm (V1) & 0.11.0 & 0.32.0 \\
-    \sglang & \verify{version} & 0.5.22 \\
-    \trt (PyTorch) & 1.0.0 & 1.2.1 \\
-    \midrule
-    Memory & 44.4\,GiB & 121\,GiB unified \\
-    KV memory fraction & 0.90 \verify{} & 0.80 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+%% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Serving engines as black boxes}
+\label{sec:engines-bb}
 
-\subsection{Models}
-\label{sec:models}
+Engines are driven exclusively through their OpenAI-compatible \texttt{/v1/completions} endpoint
+with token streaming. Each engine is therefore measured as applications use it, including its HTTP
+frontend, tokenizer, and scheduler, and a new engine is added with a thin adapter that only maps the
+configuration $\theta$ to the engine's launch options. The benchmark makes no assumption about an
+engine's internal design; differences in scheduling and memory management are inferred from
+client-side measurements and, where available, explained with the engine's own metrics.
 
-We select three instruction-tuned models whose per-token KV footprint spans a wide range
-(\cref{tab:models}). Qwen1.5-14B-Chat~\cite{bai2023qwen} is the only one without any KV-head
-reduction ($H_{kv}=40$), so it needs $5\times$ the cache per token of Mistral-NeMo-12B and
-$6.25\times$ that of Llama-3.1-8B~\cite{dubey2024llama3}. We considered distilled reasoning
-models but rejected them after confirming from their configuration files that they use GQA
-backbones and would not provide the architectural contrast.
+%% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Evaluation and monitoring harness}
+\label{sec:harness}
 
-\begin{table}[t]
-  \caption{Models. KV bytes per token at fp16.}
-  \label{tab:models}
-  \small
-  \begin{tabular}{@{}llrrr@{}}
-    \toprule
-    Model & Attn. & $H_{kv}$ & Layers & KV B/token \\
-    \midrule
-    Llama-3.1-8B-Instruct & GQA & 8 & 32 & 131{,}072 \\
-    Mistral-NeMo-12B-Instr.~\cite{mistralnemo} & GQA & 8 & 40 & 163{,}840 \\
-    Qwen1.5-14B-Chat & MHA & 40 & 40 & 819{,}200 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+\paragraph{Metrics.}
+For each request the client records $a_i$, $s_i$, the arrival times $t_{i,1} < \dots < t_{i,n_i}$
+of its $n_i$ output tokens, and an outcome $o_i \in \{\textsc{fin}, \textsc{zero}, \textsc{to}\}$
+(finished, ended without a token, timed out). The user-facing metrics are:
+\begin{align}
+  \mathrm{TTFT}_i &= t_{i,1} - a_i, \label{eq:ttft}\\
+  \mathrm{TBT}_{i,k} &= t_{i,k+1} - t_{i,k}, \qquad G_i = \max_k \mathrm{TBT}_{i,k}, \label{eq:tbt}\\
+  \mathrm{TPOT}_i &= \frac{t_{i,n_i} - t_{i,1}}{n_i - 1}, \label{eq:tpot}\\
+  \mathrm{E2E}_i &= t_{i,n_i} - a_i, \label{eq:e2e}\\
+  X &= \frac{\sum_{i:\,o_i=\textsc{fin}} n_i}{\max_i t_{i,n_i} - \min_i a_i}. \label{eq:thr}
+\end{align}
+TTFT is the time to first token, TBT the time between streamed chunks with $G_i$ the longest stall a
+user sees, TPOT the time per output token, E2E the end-to-end latency, and $X$ the output throughput.
+TPOT, unlike TBT, does not depend on how many tokens a chunk carries, which keeps it comparable when
+speculative decoding emits several tokens at once.
 
-\paragraph{Prompt formatting.}
-The harness sends plain instruction text to the completions endpoint. Qwen1.5-14B-Chat emits
-its end-of-turn token immediately on unformatted prompts, so for this model the harness
-applies the model's chat template at send time. \todo{decide whether to template all models;
-see \cref{sec:threats} on output length and zero-token replies}
+\paragraph{Engine-side monitoring.}\label{sec:observability}
+In parallel, the harness polls the engine's native metrics endpoint every $\Delta t$ seconds for
+KV-cache occupancy, running and waiting sequences, preemptions, and prefix-cache hit rate. These
+signals have engine-specific semantics---cumulative versus per-batch windows, or availability only
+after a run---so they are used solely to \emph{explain} client-side results, never to rank engines.
 
-\subsection{Workloads}
-\label{sec:workloads}
+\paragraph{Validity protocol.}
+Five rules keep the measurements comparable across engines.
+\begin{enumerate}
+  \item \emph{Open-loop arrivals.} The trace is fixed before the run, so a slow engine cannot
+  slow down its own offered load.
+  \item \emph{Arrival-based latency.} TTFT and E2E are measured from arrival $a_i$, so client-side
+  queueing $q_i$ counts against the system; measuring from dispatch would hide it (coordinated
+  omission~\cite{tene2015latency}). The exception is a later conversation turn, whose wait for the
+  previous answer is the user's own; there TTFT is measured from $s_i$.
+  \item \emph{Censoring instead of dropping.} A request without a first token within $\tau_1$ of
+  dispatch is assigned $\mathrm{TTFT}_i = q_i + \tau_1$ and $\mathrm{E2E}_i \ge q_i + \tau_1$; one that
+  does not finish within $\tau_2$ is assigned $\mathrm{E2E}_i = q_i + \tau_2$. Dropping them would
+  remove an overloaded engine's worst latencies.
+  \item \emph{Separating model failures from engine failures.} Zero-token replies reflect the model
+  or prompt, not latency; they are excluded from latency statistics but count as goodput misses.
+  Requests the client cannot send (e.g., prompts longer than the context) are excluded and reported.
+  \item \emph{Isolation.} Each experiment runs on a freshly started server with no other load.
+\end{enumerate}
 
-All workloads are built from public corpora (\cref{tab:workloads}).
-\texttt{mixed\_real} mixes four task types in equal shares: chat prompts from
-ShareGPT~\cite{sharegpt}, code generation from MBPP~\cite{austin2021mbpp}, reasoning from
-GSM8K~\cite{cobbe2021gsm8k}, and summarisation from CNN/DailyMail~\cite{hermann2015cnn}. It
-combines short prompts with very long requested outputs (reasoning) and long prompts with short
-outputs (summarisation), so a few long-running requests can occupy scheduler slots and KV memory
-for minutes. \texttt{chat\_multiturn} replays ShareGPT conversations of two to six turns; each
-turn resends the conversation history, which makes prefix reuse possible. \texttt{chat\_real\_long}
-uses single-turn ShareGPT prompts of at least 500 tokens to stress prefill.
+%% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Statistical analysis}
+\label{sec:analysis}
 
-\begin{table}[t]
-  \caption{Workloads (per rate configuration; token counts are medians).}
-  \label{tab:workloads}
-  \footnotesize
-  \setlength{\tabcolsep}{4pt}
-  \begin{tabular}{@{}llrrr@{}}
-    \toprule
-    Workload & Task (source) & Req. & Prompt & Max out \\
-    \midrule
-    \multirow{4}{*}{\texttt{mixed\_real}}
-      & chat (ShareGPT) & 125 & 20 & 239 \\
-      & code (MBPP) & 125 & 53 & 45 \\
-      & reasoning (GSM8K) & 125 & 85 & 6{,}810 \\
-      & summ.\ (CNN/DM) & 125 & 791 & 64 \\
-    \texttt{chat\_multiturn} & 2--6 turns (ShareGPT) & 280--600 & 454 & 310 \\
-    \texttt{chat\_real\_long} & $\geq$500 tok.\ (ShareGPT) & 300 & 938 & \verify{} \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+\paragraph{Distributions.}
+Per-request metrics are summarised by empirical quantiles $Q_p(\cdot)$, typically
+$p \in \{0.5, 0.95, 0.99\}$, and by empirical CDFs where the shape matters. \todo{add bootstrap
+confidence intervals over requests for the reported quantiles}
 
-\subsection{Metrics}
-\label{sec:metrics}
+\paragraph{SLO goodput.}
+Given a TTFT target $T^\star$ and a TPOT target $P^\star$, goodput is the share of \emph{all}
+requests that finish within both:
+\begin{equation}
+  \Gamma(T^\star, P^\star) = \frac{1}{N} \sum_{i=1}^{N}
+  \mathbb{1}\!\left[\, o_i = \textsc{fin} \;\wedge\; \mathrm{TTFT}_i \le T^\star \;\wedge\;
+  \mathrm{TPOT}_i \le P^\star \right].
+  \label{eq:goodput}
+\end{equation}
+Goodput rewards neither speed on a subset of requests nor success with unusable latency, and it is
+the measure on which engines are ranked.
 
-\begin{description}
-  \item[TTFT] Time to first token. For open-loop \texttt{mixed\_real} we measure it from the
-  request's scheduled \emph{arrival}, i.e., including any time spent queued at the client;
-  measuring from dispatch hides that queueing (\cref{sec:discussion}). For
-  \texttt{chat\_multiturn}, where later turns are deliberately held until the previous turn
-  ends, we measure from dispatch.
-  \item[TBT] Time between consecutive streamed chunks, summarised per request by its 95th
-  percentile and maximum (the longest stall).
-  \item[TPOT] Time per output token, $(\mathrm{E2E}-\mathrm{TTFT})/(n-1)$ for $n$ output tokens.
-  Unlike TBT it is unaffected by how many tokens a chunk carries, which matters under
-  speculative decoding.
-  \item[E2E] End-to-end latency, from arrival to the last token.
-  \item[Throughput] Output tokens per second over a rate configuration.
-  \item[Outcome] Finished, timed out, or \emph{zero-token reply} (the server ends the stream
-  without producing a token).
-  \item[Goodput] The share of \emph{all} requests that finish while meeting both a TTFT and a
-  TPOT target. We use a \emph{strict} SLO (TTFT $\le$ 2\,s, TPOT $\le$ 200\,ms) and a
-  \emph{relaxed} SLO (TTFT $\le$ 4\,s, TPOT $\le$ 500\,ms).
-\end{description}
+\paragraph{Feature effects.}
+The effect of a feature set $\phi$ on a metric $\mu$ is reported relative to the same experiment
+without it,
+\begin{equation}
+  \Delta_\mu(\phi) = \frac{\mu(\theta_\phi) - \mu(\theta_\varnothing)}{\mu(\theta_\varnothing)},
+  \label{eq:delta}
+\end{equation}
+so that features can be compared across engines whose absolute performance differs.
 
-\paragraph{Censoring.}
-Discarding timed-out requests would make an overloaded engine look fast. We therefore count a
-request with no first token by 300\,s as TTFT $=$ 300\,s and E2E $\ge$ 300\,s, and a request
-that started but did not finish by 600\,s as E2E $=$ 600\,s. Zero-token replies are excluded
-from latency statistics and count as goodput misses.
-
-\paragraph{Scheduler-internal metrics.}
-Engine-reported metrics are used only to explain user-facing results, because their semantics
-differ between engines: \vllm reports a cumulative prefix-cache hit rate and a per-server
-preemption counter; \sglang reports the hit rate of the most recent batch and, from version 0.5,
-a retraction counter; \trt's statistics endpoint is read once after each run in our harness.
-
-\subsection{Experimental design}
-\label{sec:design}
-
-\Cref{tab:design} summarises the configurations per research question. Every configuration is
-run with all three engines and all five arrival processes.
-
-\begin{table}[t]
-  \caption{Experimental design.}
-  \label{tab:design}
-  \small
-  \begin{tabular}{@{}lp{6.1cm}@{}}
-    \toprule
-    RQ & Configurations \\
-    \midrule
-    \rqref{1} & 3 models; \texttt{mixed\_real}, \texttt{chat\_multiturn}; client concurrency 16, 256
-    (256 only for Qwen1.5); \texttt{max\_num\_seqs} 64, 256; baseline strategy \\
-    \rqref{2} & Mistral-NeMo; \texttt{chat\_multiturn}, \texttt{chat\_real\_long}; prefix caching
-    on/off $\times$ chunked prefill off/512 tokens; concurrency 256 \\
-    \rqref{3} & Mistral-NeMo; \texttt{mixed\_real}, \texttt{chat\_multiturn}; baseline vs.\ n-gram
-    ($k{=}3$); \texttt{max\_num\_seqs} 32, 64; concurrency 256 \\
-    \rqref{4} & \rqref{1} protocol on GB10 at concurrency 256 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-In total the study comprises \todo{count} rate configurations and \todo{count} requests on the
-L40S and 180 rate configurations and 72{,}000 requests on the GB10. Each configuration is run
-once.
+\paragraph{Load response.}
+Metrics are reported as functions of the arrival rate $\lambda$ and, to expose how a backlog forms
+within a run, of a request's position in the trace; the position at which TTFT first exceeds a
+threshold marks the point where a resource saturates.
