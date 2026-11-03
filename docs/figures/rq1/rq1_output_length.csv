@@ -1,0 +1,7 @@
+model,tasks,n,mean_tokens,median_tokens,p90_tokens
+llama31_8b,reasoning,6396,5338.598186366479,5861.0,8100.0
+mistral_nemo_12b,reasoning,7000,829.4225714285715,424.0,841.6000000000022
+qwen15_14b,reasoning,3033,826.3452027695351,759.0,1245.4000000000005
+llama31_8b,"chat, code, summarization",21434,131.82131193430996,72.0,318.0
+mistral_nemo_12b,"chat, code, summarization",20921,124.4533722097414,72.0,313.0
+qwen15_14b,"chat, code, summarization",9867,126.01124961994527,72.0,318.0

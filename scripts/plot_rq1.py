@@ -11,7 +11,7 @@ aggregated numbers behind them.
 Figures (ACM single-column width unless noted):
   fig_rq1_1_kv_vs_preemption   peak KV-cache use vs preemptions, one point per rate config
   fig_rq1_2_saturation_timeline KV use and cumulative preemptions over a run (double column)
-  fig_rq1_3_output_length      ECDF of completion_ratio per model (output-length confound check)
+  fig_rq1_3_output_length      ECDF of output tokens per model, reasoning vs other tasks (confound check)
   fig_rq1_4_itl_cost           max inter-token latency, requests overlapping preemption vs not
   fig_rq1_5_engine_policy      running/waiting sequences per engine + TTFT (double column)
   fig_rq1_6_max_num_seqs       max_num_seqs 64 vs 256: preemptions, TTFT p95, throughput
@@ -108,10 +108,22 @@ def load(data_dir: Path, cache: Path) -> pd.DataFrame:
             df["model"] = f.stem.removeprefix("rq1_")
         frames.append(df)
     df = pd.concat(frames, ignore_index=True)
-    # vLLM exports the KV gauge as a 0–1 fraction; normalise every engine to percent.
+    df["engine"] = df["engine"].replace({"tensorrtllm": "tensorrt-llm", "trtllm": "tensorrt-llm"})
     for eng, g in df.groupby("engine"):
-        if g["kv_cache_usage_pct"].max(skipna=True) <= 1.0:
+        kv = g["kv_cache_usage_pct"]
+        if kv.fillna(0).eq(0).all():
+            # Engine never reported KV use live (TensorRT-LLM in this harness): unknown, not 0%.
+            df.loc[g.index, "kv_cache_usage_pct"] = np.nan
+        elif kv.max(skipna=True) <= 1.0:
+            # vLLM/SGLang export the KV gauge as a 0–1 fraction; normalise to percent.
             df.loc[g.index, "kv_cache_usage_pct"] *= 100.0
+        if g["num_waiting_seqs"].fillna(0).eq(0).all() and g["num_running_seqs"].fillna(0).le(1).all():
+            # Placeholder values (running<=1, waiting=0 throughout): not exposed live.
+            df.loc[g.index, ["num_running_seqs", "num_waiting_seqs"]] = np.nan
+    # TensorRT-LLM's paused-request count is scraped once after the run, when the server
+    # is idle, so it always reads 0 (draft §3.3). Treat it as unmeasured.
+    tr = df["engine"] == "tensorrt-llm"
+    df.loc[tr, ["num_preemptions", "num_preemptions_delta"]] = np.nan
     df.to_parquet(cache, index=False)
     print(f"Cached trimmed data to {cache} ({cache.stat().st_size / 1e6:.1f} MB)")
     return df
@@ -222,7 +234,7 @@ def fig2(df: pd.DataFrame, out: Path) -> None:
         if g.empty:
             a_kv.text(.5, .5, "no run", ha="center", transform=a_kv.transAxes); continue
         rates.add(rate)
-        d = _timeline(g, ["kv_cache_usage_pct"])
+        d = _timeline(g, ["kv_cache_usage_pct"], window=1)  # raw: smoothing hides short saturation spikes
         c = MODELS[m]["color"]
         a_kv.plot(d.t, d.kv_cache_usage_pct, color=c, linewidth=1.0)
         a_kv.axhline(100, color=INK2, linestyle=(0, (3, 2)), linewidth=0.7)
@@ -241,24 +253,24 @@ def fig2(df: pd.DataFrame, out: Path) -> None:
 
 
 def fig3(df: pd.DataFrame, out: Path) -> pd.DataFrame:
-    ok = df[(df.status == "ok") & df.completion_ratio.notna()]
-    wls = [w for w in ("mixed_real", "chat_multiturn") if w in set(ok.workload_name)]
-    fig, axes = plt.subplots(1, len(wls), figsize=(COL_W, 1.9), sharey=True, squeeze=False)
+    """Same prompts, different output lengths: reasoning vs all other task types."""
+    ok = df[(df.status == "ok") & (df.workload_name == "mixed_real") & (df.output_tokens > 0)]
+    groups = [("reasoning", ok.task_type == "reasoning"), ("chat, code, summarization", ok.task_type != "reasoning")]
+    fig, axes = plt.subplots(1, 2, figsize=(COL_W, 1.9), sharey=True, squeeze=False)
     stats = []
-    for ax, w in zip(axes[0], wls):
+    for ax, (name, mask) in zip(axes[0], groups):
         for m in MODELS:
-            x = np.sort(ok[(ok.model == m) & (ok.workload_name == w)].completion_ratio.clip(upper=1.5).values)
+            x = np.sort(ok[mask & (ok.model == m)].output_tokens.values)
             if not len(x):
                 continue
             ax.step(x, np.arange(1, len(x) + 1) / len(x), where="post", color=MODELS[m]["color"])
-            stats.append(dict(model=m, workload=w, n=len(x), median=np.median(x),
-                              share_at_limit=float((x >= 0.99).mean())))
-        ax.axvline(1.0, color=INK2, linestyle=(0, (3, 2)), linewidth=0.7)
-        ax.set_title(w, loc="left"); ax.set_xlabel("Output / reference length")
-        ax.set_xlim(0, 1.5)
+            stats.append(dict(model=m, tasks=name, n=len(x), mean_tokens=x.mean(), median_tokens=np.median(x),
+                              p90_tokens=np.quantile(x, .9)))
+        ax.set_xscale("log")
+        ax.set_title(name, loc="left"); ax.set_xlabel("Output tokens per request")
     axes[0, 0].set_ylabel("Share of requests (ECDF)")
     handles = [plt.Line2D([], [], color=MODELS[m]["color"], label=MODELS[m]["label"]) for m in MODELS]
-    fig.legend(handles=handles, loc="upper center", ncol=3, bbox_to_anchor=(0.5, -0.02), columnspacing=1.0,
+    fig.legend(handles=handles, loc="upper center", ncol=3, bbox_to_anchor=(0.5, -0.1), columnspacing=1.0,
                handlelength=1.5)
     save(fig, out, "fig_rq1_3_output_length")
     return pd.DataFrame(stats)
@@ -324,6 +336,8 @@ def fig5(df: pd.DataFrame, out: Path) -> None:
     a.barh(y, [r[1] for r in ttft], color=MODELS[m]["color"], height=0.6)
     a.set_yticks(y, [r[0] for r in ttft]); a.invert_yaxis()
     a.set_xscale("log")
+    a.xaxis.set_major_locator(matplotlib.ticker.LogLocator(base=10, subs=(1.0, 3.0)))
+    a.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
     a.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
     a.set_xlabel("TTFT (s)"); a.set_title("TTFT p50 / p95", loc="left")
     a.grid(axis="y", visible=False)
@@ -332,9 +346,9 @@ def fig5(df: pd.DataFrame, out: Path) -> None:
                matplotlib.patches.Patch(color=MODELS[m]["color"], label="TTFT p50"),
                matplotlib.patches.Patch(color=GRID, label="TTFT p95")]
     fig.legend(handles=handles, loc="upper center", ncol=4, bbox_to_anchor=(0.5, -0.04))
-    fig.suptitle("Same memory pressure, different policy — Qwen1.5-14B, mixed_real, conc. 256, "
+    fig.suptitle("Under full-MHA KV pressure every engine queues; vLLM drains fastest\nQwen1.5-14B, mixed_real, conc. 256, "
                  f"max_num_seqs 256, {'/'.join(sorted(r for r in rates if r))}",
-                 x=0.07, ha="left", y=1.05, fontsize=7.5)
+                 x=0.07, ha="left", y=1.1, fontsize=7.5)
     save(fig, out, "fig_rq1_5_engine_policy")
 
 
@@ -344,7 +358,7 @@ def fig6(cfg: pd.DataFrame, out: Path) -> pd.DataFrame:
              .agg(preemptions=("preemptions", lambda s: s.sum(min_count=1)),
                   ttft_p95=("ttft_p95", "median"), req_per_s=("req_per_s", "median"))
              .reset_index())
-    panels = [("preemptions", "Preemptions (sum over rate configs)", True),
+    panels = [("preemptions", "Preemptions, vLLM (sum over rates)", True),
               ("ttft_p95", "TTFT p95 (s, median over rates)", True),
               ("req_per_s", "Completed req/s (median over rates)", False)]
     fig, axes = plt.subplots(1, 3, figsize=(DBL_W, 1.9), gridspec_kw=dict(wspace=0.35))
