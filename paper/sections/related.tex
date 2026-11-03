@@ -1,0 +1,36 @@
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{LLM serving systems.}
+Orca introduced iteration-level scheduling~\cite{yu2022orca}; \vllm added paged KV-cache
+management~\cite{kwon2023vllm}; \sglang added prefix sharing through a radix-tree cache and a
+frontend language for structured programs~\cite{zheng2024sglang}; \trt provides NVIDIA's
+optimised kernels and in-flight batching~\cite{trtllm}. Research systems improve on specific
+aspects: chunked prefill to bound decode stalls~\cite{agrawal2024sarathi}, prefill--decode
+disaggregation~\cite{zhong2024distserve,patel2024splitwise}, preemptive and fair
+scheduling~\cite{wu2023fastserve}, live migration across instances~\cite{sun2024llumnix}, and
+KV-cache-centric architectures~\cite{qin2025mooncake}. These papers evaluate their own design
+against baselines; we instead compare widely deployed engines as black boxes, through the
+interface applications use. A survey of serving techniques is given by Miao
+et~al.~\cite{miao2023survey}.
+
+\paragraph{Benchmarking and evaluating LLM inference.}
+MLPerf Inference~\cite{reddi2020mlperf} defines scenarios and latency constraints for inference
+benchmarks but targets submitted, tuned systems rather than default deployments under realistic
+mixed traffic. Etalon~\cite{agrawal2024etalon} argues that TTFT, TBT and TPOT individually miss
+user-visible stalls and proposes a fluidity metric; Andes~\cite{liu2024andes} defines quality of
+experience for streamed text. Vidur~\cite{agrawal2024vidur} simulates serving configurations to
+search for good deployments. Tools such as LLMPerf~\cite{llmperf} measure latency and throughput
+of serving endpoints. Our study complements these with a controlled cross-engine comparison under
+saturation, an explanation of the differences in terms of admission and eviction behaviour, and a
+set of methodology pitfalls observed in practice.
+
+\paragraph{Performance-engineering methodology.}
+Open- and closed-loop load generators produce different conclusions about the same
+system~\cite{schroeder2006open}, and latency recorders that measure from dispatch suffer from
+coordinated omission~\cite{tene2015latency}. Little's law~\cite{little1961} relates queue length,
+arrival rate and residence time; we use it to explain when the scheduler's sequence limit becomes
+the bottleneck. Our methodology lessons (\cref{sec:lessons}) apply these principles to LLM serving,
+where long, variable-length generations make them especially consequential.
+
+\todo{add recent empirical comparisons of serving engines (2025--2026) and position against them}

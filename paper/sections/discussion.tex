@@ -1,0 +1,74 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Choosing an engine}
+\label{sec:guide}
+
+\Cref{tab:decision} condenses the results into guidance. Its central message is that
+the right engine depends on three properties of the deployment: how heterogeneous the request
+lengths are, which latency the SLO is bound by, and how much KV-cache headroom the model leaves.
+\todo{finalise the table once \cref{sec:results} is written}
+
+\begin{table}[t]
+  \caption{Engine choice by deployment situation.}
+  \label{tab:decision}
+  \small
+  \begin{tabular}{@{}p{3.3cm}p{3.0cm}l@{}}
+    \toprule
+    Situation & Prefer & Basis \\
+    \midrule
+    Uniform requests, steady load & \trt & \rqref{1} \\
+    Mixed lengths, TTFT-bound SLO & \vllm & \rqref{1} \\
+    Smooth streaming required & \sglang / \trt & \rqref{1} \\
+    Model barely fits in KV memory & \vllm, more memory & \rqref{1}, \rqref{4} \\
+    Slot-bound deployment & raise \texttt{max\_num\_seqs} & \rqref{1} \\
+    Long prompts & chunked prefill on \trt only & \rqref{2} \\
+    Multi-turn chat & prefix caching on any engine & \rqref{2} \\
+    N-gram speculation & \vllm only & \rqref{3} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Lessons for benchmarking LLM serving}
+\label{sec:lessons}
+
+Several measurement choices that look innocuous changed our conclusions. We report them because
+they apply to any LLM serving benchmark.
+
+\paragraph{Measure TTFT from arrival, not from dispatch.}
+A client that caps in-flight requests and starts the TTFT clock at dispatch silently excludes
+the time requests spend queued at the client---the classic coordinated-omission
+problem~\cite{tene2015latency}. In our data this hidden wait reached a 95th percentile of over
+200\,s for the most overloaded engine, so dispatch-based TTFT understated the gap between
+engines precisely where it was largest. Open-loop arrival-based measurement~\cite{schroeder2006open}
+avoids this; for closed-loop multi-turn workloads, dispatch-based TTFT is the correct choice.
+
+\paragraph{Count timeouts; do not drop them.}
+Discarding requests that time out removes an overloaded engine's worst latencies and can invert
+rankings. Censoring them at the timeout value and counting them as SLO misses keeps the
+comparison honest.
+
+\paragraph{Finite traces make latency non-monotonic in load.}
+With a fixed number of requests, a low arrival rate stretches the trace over minutes, so late
+arrivals meet a KV cache already full of long-running generations, while at a high rate all
+requests arrive before the cache fills. In our data the 95th-percentile TTFT of one
+configuration was 185\,s at 2 requests/s and 0.3\,s at 16 requests/s; the cost moved from the
+first token to mid-stream stalls. Reporting latency against position in the run, or using
+duration-based traces, exposes this effect.
+
+\paragraph{Identically named engine metrics are not comparable.}
+Engines report prefix-cache hit rates over different windows (cumulative, last batch, or once
+per run), and the gap between streamed chunks shrinks or grows with the number of tokens per
+chunk under speculative decoding. We therefore compare engines only on client-side metrics and
+use engine-reported values to explain them. TPOT, unlike TBT, is robust to multi-token chunks.
+
+\paragraph{Prompt formatting affects load, not just quality.}
+Sending unformatted prompts to instruction-tuned models changed how many tokens they generated
+and, for some models, produced replies with zero tokens. Both change the load an engine
+experiences; a benchmark should either apply each model's chat template or report output-length
+distributions alongside latency.
+
+\paragraph{Per-token speed is a poor proxy for service quality.}
+Under the SLOs we study, goodput was decided almost entirely by TTFT: requests that missed only
+the TPOT target were at most 2\% in every configuration. Benchmarks that report tokens per second
+at a comfortable load measure the property that least often limits real deployments.

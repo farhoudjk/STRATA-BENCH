@@ -1,0 +1,25 @@
+\begin{abstract}
+Large language model (LLM) services are deployed on open-source serving engines whose
+schedulers decide, under load, which requests run, which wait, and which are evicted.
+These decisions are invisible to the application, yet they determine what users experience.
+Published comparisons of serving engines mostly report peak throughput or per-token speed,
+which says little about how an engine behaves once its memory or scheduling capacity is
+exhausted. We present an empirical comparison of three widely used engines, \vllm, \sglang,
+and \trt, driven through their own OpenAI-compatible frontends by a common open-loop
+benchmark harness. We measure six user-facing metrics (time to first token, time between
+tokens, time per output token, end-to-end latency, throughput, and request outcome) and
+combine them into SLO goodput, across three models with different key--value (KV) cache
+footprints, realistic mixed and multi-turn workloads, five arrival processes, two scheduler
+capacity settings, two prefill-handling features, n-gram speculative decoding, and two
+hardware platforms.
+
+The engines are nearly indistinguishable at light load and diverge sharply once a resource
+saturates, and they diverge in \emph{where} they make requests wait. On heterogeneous
+traffic the engine with the fastest token generation delivers the lowest goodput, while on
+uniform traffic it is the fastest end to end; a performance feature that helps one engine
+can hurt another. We also report methodology pitfalls that change conclusions: time to first
+token measured from dispatch hides client-side queueing, finite traces make latency
+non-monotonic in load, and identically named engine metrics are not comparable. We conclude
+with a decision guide for practitioners and release the harness and data.
+\todo{tighten to the final RQ findings; ICPE abstracts are typically 150--250 words}
+\end{abstract}

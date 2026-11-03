@@ -1,0 +1,80 @@
+\section{Introduction}
+\label{sec:intro}
+
+Serving a large language model (LLM) is a queueing problem with an unusual resource: the
+key--value (KV) cache, which grows with every token a request generates and must stay in GPU
+memory until the request finishes. Modern serving engines---\vllm~\cite{kwon2023vllm},
+\sglang~\cite{zheng2024sglang}, and \trt~\cite{trtllm}---batch requests continuously at
+iteration granularity~\cite{yu2022orca} and manage the KV cache in blocks, which lets them
+keep hundreds of requests in flight on one GPU. When the KV cache or the scheduler's slots
+run out, however, each engine must choose: admit a new request and risk evicting a running
+one, or hold the new request back. These choices are made inside the engine, are rarely
+documented as part of the engine's contract, and are not exposed through the OpenAI-compatible
+APIs that applications use.
+
+Practitioners choosing an engine typically rely on published per-token throughput figures or
+on vendor benchmarks run at a fixed, comfortable load. Such figures answer the question
+``how fast can this engine generate tokens?'' but not the question operators actually face:
+``what will my users experience when traffic is heavy, request lengths vary, and memory is
+tight?'' The answer depends on several metrics at once---how long a user waits for the first
+token, whether the stream stalls midway, how long the whole answer takes, how many requests
+fail---and on which of these the application's service-level objective (SLO) is bound by.
+
+This paper compares \vllm, \sglang, and \trt empirically under conditions that expose their
+scheduling behaviour. We drive all three through their own OpenAI-compatible serving
+frontends with a common open-loop harness, \sysname, using realistic workloads assembled from
+public corpora, Poisson and bursty arrival processes, and three models whose per-token KV
+footprint differs by up to $6.25\times$, including one model with full multi-head attention
+(MHA) and two with grouped-query attention (GQA)~\cite{ainslie2023gqa}. We organise the study
+around four research questions:
+
+\begin{description}
+  \item[\rqref{1}] \emph{Engine behaviour under load.} How do the engines compare in
+  responsiveness, streaming quality, end-to-end latency, throughput, reliability, and SLO
+  goodput as load and KV-cache pressure increase, and what scheduler behaviour explains the
+  differences?
+  \item[\rqref{2}] \emph{Prefill handling.} How do prefix caching and chunked prefill change
+  latency under load on each engine?
+  \item[\rqref{3}] \emph{Speculative decoding.} Does n-gram speculative decoding improve
+  latency and throughput, and is the effect consistent across engines?
+  \item[\rqref{4}] \emph{Hardware generalisation.} Do the \rqref{1} findings hold on a
+  different hardware platform with a much larger, unified memory?
+\end{description}
+
+\paragraph{Findings.}
+\todo{finalise against \cref{sec:results}; the statements below reflect the current analysis}
+\begin{itemize}
+  \item At light load the engines are interchangeable: decode speed differs by at most 6\%.
+  They diverge once a resource saturates, and the dominant difference is \emph{where} each
+  engine makes requests wait: \vllm admits early and later stalls running streams,
+  \sglang holds requests before their first token and then streams smoothly, and \trt admits
+  the fewest requests.
+  \item The engine with the fastest token generation (\trt) has the lowest SLO goodput on
+  heterogeneous traffic, yet the lowest end-to-end latency on uniform multi-turn traffic.
+  Under the SLOs we study, goodput is decided by time to first token, not by token speed.
+  \item Raising the scheduler's sequence limit doubles goodput when slots are the bottleneck
+  and has no effect when the KV cache or the engine's admission policy is.
+  \item Performance features are engine-specific: prefix caching helps all engines alike,
+  whereas chunked prefill and n-gram speculative decoding help one engine and hurt another.
+  \item The engine ranking under KV pressure is preserved on a second platform with
+  $2.7\times$ the memory and newer engine versions.
+\end{itemize}
+
+\paragraph{Contributions.}
+\begin{enumerate}
+  \item A controlled, multi-metric comparison of three production LLM serving engines under
+  load, covering latency, streaming quality, throughput, reliability, and SLO goodput
+  (\cref{sec:results}).
+  \item An explanation of the observed differences in terms of each engine's admission and
+  eviction behaviour, the scheduler's sequence limit, and the KV-cache footprint of the model.
+  \item A set of methodology lessons for benchmarking LLM serving, each of which changes a
+  conclusion if ignored (\cref{sec:discussion}).
+  \item A decision guide for practitioners, and an open benchmark harness with all
+  per-request data (\cref{sec:conclusion}).
+\end{enumerate}
+
+The remainder of the paper is organised as follows. \Cref{sec:background} summarises the
+serving mechanisms that matter for our results. \Cref{sec:method} describes the harness,
+engines, models, workloads, and metrics. \Cref{sec:results} answers the research questions.
+\Cref{sec:discussion} discusses implications for practitioners and for benchmarking,
+\cref{sec:threats} threats to validity, and \cref{sec:related} related work.

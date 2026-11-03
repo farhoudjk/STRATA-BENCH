@@ -1,0 +1,16 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+We compared \vllm, \sglang, and \trt under load across six user-facing metrics and SLO goodput,
+three models with different KV-cache footprints, realistic workloads, and two hardware platforms.
+The engines behave alike until a resource saturates; beyond that point they differ mainly in how
+they admit requests and where they make them wait, and those differences decide which engine
+meets a given SLO. No engine is best across workloads, metrics, and features: the fastest decoder
+can deliver the lowest goodput, and a feature that helps one engine can hurt another. We hope the
+decision guide and the methodology lessons help practitioners choose and evaluate serving engines
+for their own traffic. \todo{finalise against the results}
+
+\paragraph{Data and artifact availability.}
+The benchmark harness, configuration files, per-request measurements for all runs, and the
+scripts that produce every figure and table will be released as an archived artifact with a DOI.
+\todo{Zenodo DOI; link withheld for double-anonymous review}

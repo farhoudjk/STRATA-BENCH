@@ -1,0 +1,55 @@
+\section{Background}
+\label{sec:background}
+
+\paragraph{Prefill, decode, and the KV cache.}
+An autoregressive transformer~\cite{vaswani2017attention} serves a request in two phases. The
+\emph{prefill} phase processes the whole prompt in one forward pass and produces the first
+output token; the \emph{decode} phase then generates one token per forward pass. Each layer
+stores the keys and values of every processed token in the KV cache, so a request's cache
+footprint grows linearly with its prompt and output length. The footprint per token is
+$2 \times L \times H_{kv} \times d_{head} \times b$ bytes for $L$ layers, $H_{kv}$ KV heads
+of dimension $d_{head}$, and $b$ bytes per element. Multi-query~\cite{shazeer2019mqa} and
+grouped-query attention~\cite{ainslie2023gqa} reduce $H_{kv}$ below the number of query
+heads; models with full multi-head attention (MHA) keep one KV head per query head and
+therefore need several times more cache per token.
+
+\paragraph{Continuous batching and paged KV memory.}
+Serving engines batch at iteration granularity: requests join and leave the running batch
+between forward passes~\cite{yu2022orca}. To avoid fragmentation, \vllm's PagedAttention
+stores the KV cache in fixed-size blocks allocated on demand~\cite{kwon2023vllm}; \sglang and
+\trt use comparable block-based managers. The number of requests that can run concurrently is
+bounded by two limits: a configured maximum number of running sequences (\texttt{max\_num\_seqs}
+in \vllm; analogous settings in the other engines) and the free capacity of the KV-cache pool.
+
+\paragraph{Admission, preemption, and eviction.}
+When the KV pool fills, an engine must either stop admitting requests or reclaim memory from
+running ones. Engines differ in how much memory they reserve when they admit a request.
+Allocating on demand admits the most requests but may later run out of memory mid-generation,
+forcing the engine to \emph{preempt} a running sequence, discard its cache, and recompute it
+later. Reserving memory for a request's maximum output length up front avoids eviction but
+admits fewer requests. \todo{document each engine's default policy and the configuration used
+here: vLLM V1 preempt-and-recompute; SGLang retraction with an estimated new-token ratio;
+TensorRT-LLM capacity-scheduler policy (verify against the launch log)}
+
+\paragraph{Prefill-handling features.}
+\emph{Prefix caching} retains the KV cache of previously processed prompts so that a request
+sharing a prefix---for example, the next turn of a conversation---skips recomputing it;
+\sglang organises this cache as a radix tree~\cite{zheng2024sglang}. \emph{Chunked prefill}
+splits a long prompt into fixed-size chunks that are interleaved with decode steps, bounding
+how long a long prompt can stall the running batch~\cite{agrawal2024sarathi}.
+Disaggregating prefill and decode onto different devices~\cite{zhong2024distserve,patel2024splitwise}
+is out of scope for this single-GPU study.
+
+\paragraph{Speculative decoding.}
+Speculative decoding drafts several tokens cheaply and verifies them in one forward pass of
+the target model, accepting the longest correct prefix~\cite{leviathan2023spec,chen2023specsampling}.
+\emph{N-gram} (prompt-lookup) speculation drafts by matching the most recent tokens against
+earlier text in the context and needs no draft model~\cite{saxena2023pld}. Its benefit depends
+on the draft acceptance rate and on the extra work verification adds to each batch.
+
+\paragraph{User-facing latency metrics.}
+Time to first token (TTFT) is dominated by queueing and prefill; the time between streamed
+tokens (TBT) and the time per output token (TPOT) by decode; end-to-end latency (E2E) by both.
+Because no single metric captures user experience, recent work evaluates serving systems by
+\emph{goodput}: the rate or share of requests that meet all SLO targets at
+once~\cite{zhong2024distserve}.

@@ -1,0 +1,38 @@
+\section{Threats to Validity}
+\label{sec:threats}
+
+\paragraph{Construct validity.}
+Our goodput SLOs (2\,s/200\,ms and 4\,s/500\,ms) are representative of interactive chat but not
+of every application; a tighter TPOT target favours the engine with the fastest decode, and we
+report that variant in the supplementary material. Engine-reported metrics have different
+semantics across engines (\cref{sec:metrics}); we use them only to explain client-side results.
+Prefix-cache hit rates are measured per server, not per request.
+
+\paragraph{Internal validity.}
+Configuration options are mapped to each engine on a best-effort basis; ``the same'' nominal
+setting (e.g., chunk size, sequence limit, n-gram window) reflects each engine's own
+implementation. Two configuration defects were found and fixed before the corresponding sweeps
+(\cref{sec:engines}); others may remain in less-exercised code paths. Enabling n-gram speculation
+on \trt required disabling its overlap scheduler, which confounds that engine's speculative-decoding
+result \todo{add a baseline with the overlap scheduler disabled}. \trt's KV-cache and queue
+statistics were not observable live, so its scheduler behaviour is inferred from client-side
+measurements. \todo{confirm its capacity-scheduler policy from the launch log}
+
+Prompts are not chat-templated for Llama-3.1-8B and Mistral-NeMo-12B. Llama-3.1-8B consequently
+generates about six times longer reasoning outputs than the other models, raising its KV pressure
+on \texttt{mixed\_real}, and Mistral-NeMo-12B returns zero-token replies for 7--17\% of requests on
+every engine. Both effects are identical across engines and therefore do not bias engine
+comparisons within a model, but they limit comparisons across models.
+
+\paragraph{External validity.}
+Results come from single-GPU deployments of 8--14B-parameter models on two platforms, with fp16
+weights and no tensor parallelism. Larger models, quantisation, multi-GPU deployments, and
+disaggregated serving may change both absolute numbers and rankings. The \rqref{4} platform also
+uses newer engine versions, so hardware and software effects are not separated there. Arrival
+processes are synthetic, and real traffic may differ in burstiness and length mix.
+
+\paragraph{Conclusion validity.}
+Each configuration was run once, so we report no confidence intervals. We mitigate this by
+relying on effects that are large relative to run-to-run variation (often an order of magnitude),
+by observing them consistently across arrival rates and models, and by reproducing the main
+ranking on a second platform. \todo{add repeated runs for a subset of configurations}

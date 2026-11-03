@@ -1,0 +1,249 @@
+%% References for the ICPE 2027 draft.
+%% Entries marked "% VERIFY" need their details checked against the publisher page.
+
+%% ── Serving systems ─────────────────────────────────────────────────────────
+@inproceedings{kwon2023vllm,
+  author    = {Kwon, Woosuk and Li, Zhuohan and Zhuang, Siyuan and Sheng, Ying and Zheng, Lianmin and Yu, Cody Hao and Gonzalez, Joseph E. and Zhang, Hao and Stoica, Ion},
+  title     = {Efficient Memory Management for Large Language Model Serving with {PagedAttention}},
+  booktitle = {Proceedings of the 29th Symposium on Operating Systems Principles (SOSP)},
+  year      = {2023},
+  pages     = {611--626},
+  publisher = {ACM},
+  doi       = {10.1145/3600006.3613165}
+}
+
+@inproceedings{zheng2024sglang,
+  author    = {Zheng, Lianmin and Yin, Liangsheng and Xie, Zhiqiang and Sun, Chuyue and Huang, Jeff and Yu, Cody Hao and Cao, Shiyi and Kozyrakis, Christos and Stoica, Ion and Gonzalez, Joseph E. and Barrett, Clark and Sheng, Ying},
+  title     = {{SGLang}: Efficient Execution of Structured Language Model Programs},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year      = {2024}
+}
+
+@misc{trtllm,
+  author       = {{NVIDIA}},
+  title        = {{TensorRT-LLM}},
+  howpublished = {\url{https://github.com/NVIDIA/TensorRT-LLM}},
+  year         = {2026},
+  note         = {Accessed 2026}
+}
+
+@inproceedings{yu2022orca,
+  author    = {Yu, Gyeong-In and Jeong, Joo Seong and Kim, Geon-Woo and Kim, Soojeong and Chun, Byung-Gon},
+  title     = {Orca: A Distributed Serving System for Transformer-Based Generative Models},
+  booktitle = {16th USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
+  year      = {2022},
+  pages     = {521--538}
+}
+
+@inproceedings{agrawal2024sarathi,
+  author    = {Agrawal, Amey and Kedia, Nitin and Panwar, Ashish and Mohan, Jayashree and Kwatra, Nipun and Gulavani, Bhargav S. and Tumanov, Alexey and Ramjee, Ramachandran},
+  title     = {Taming Throughput-Latency Tradeoff in {LLM} Inference with {Sarathi-Serve}},
+  booktitle = {18th USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
+  year      = {2024}
+}
+
+@inproceedings{zhong2024distserve,
+  author    = {Zhong, Yinmin and Liu, Shengyu and Chen, Junda and Hu, Jianbo and Zhu, Yibo and Liu, Xuanzhe and Jin, Xin and Zhang, Hao},
+  title     = {{DistServe}: Disaggregating Prefill and Decoding for Goodput-optimized Large Language Model Serving},
+  booktitle = {18th USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
+  year      = {2024}
+}
+
+@inproceedings{patel2024splitwise,
+  author    = {Patel, Pratyush and Choukse, Esha and Zhang, Chaojie and Shah, Aashaka and Goiri, {\'I}{\~n}igo and Maleki, Saeed and Bianchini, Ricardo},
+  title     = {Splitwise: Efficient Generative {LLM} Inference Using Phase Splitting},
+  booktitle = {51st ACM/IEEE Annual International Symposium on Computer Architecture (ISCA)},
+  year      = {2024}
+}
+
+@inproceedings{sun2024llumnix,
+  author    = {Sun, Biao and Huang, Ziming and Zhao, Hanyu and Xiao, Wencong and Zhang, Xinyi and Li, Yong and Lin, Wei},
+  title     = {Llumnix: Dynamic Scheduling for Large Language Model Serving},
+  booktitle = {18th USENIX Symposium on Operating Systems Design and Implementation (OSDI)},
+  year      = {2024}
+}
+
+@misc{wu2023fastserve,
+  author        = {Wu, Bingyang and Zhong, Yinmin and Zhang, Zili and Huang, Gang and Liu, Xuanzhe and Jin, Xin},
+  title         = {Fast Distributed Inference Serving for Large Language Models},
+  year          = {2023},
+  eprint        = {2305.05920},
+  archivePrefix = {arXiv}
+}
+
+@inproceedings{qin2025mooncake,
+  author    = {Qin, Ruoyu and Li, Zheming and He, Weiran and Cui, Jialei and Ren, Feng and Zhang, Mingxing and Wu, Yongwei and Zheng, Weimin and Xu, Xinran},
+  title     = {Mooncake: Trading More Storage for Less Computation --- A {KVCache}-centric Architecture for Serving {LLM} Chatbot},
+  booktitle = {23rd USENIX Conference on File and Storage Technologies (FAST)},
+  year      = {2025}
+} % VERIFY author list
+
+@misc{miao2023survey,
+  author        = {Miao, Xupeng and Oliaro, Gabriele and Zhang, Zhihao and Cheng, Xinhao and Jin, Hongyi and Chen, Tianqi and Jia, Zhihao},
+  title         = {Towards Efficient Generative Large Language Model Serving: A Survey from Algorithms to Systems},
+  year          = {2023},
+  eprint        = {2312.15234},
+  archivePrefix = {arXiv}
+}
+
+%% ── Model architecture and decoding ─────────────────────────────────────────
+@inproceedings{vaswani2017attention,
+  author    = {Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N. and Kaiser, {\L}ukasz and Polosukhin, Illia},
+  title     = {Attention Is All You Need},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year      = {2017}
+}
+
+@misc{shazeer2019mqa,
+  author        = {Shazeer, Noam},
+  title         = {Fast Transformer Decoding: One Write-Head is All You Need},
+  year          = {2019},
+  eprint        = {1911.02150},
+  archivePrefix = {arXiv}
+}
+
+@inproceedings{ainslie2023gqa,
+  author    = {Ainslie, Joshua and Lee-Thorp, James and de Jong, Michiel and Zemlyanskiy, Yury and Lebr{\'o}n, Federico and Sanghai, Sumit},
+  title     = {{GQA}: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints},
+  booktitle = {Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing (EMNLP)},
+  year      = {2023}
+}
+
+@inproceedings{leviathan2023spec,
+  author    = {Leviathan, Yaniv and Kalman, Matan and Matias, Yossi},
+  title     = {Fast Inference from Transformers via Speculative Decoding},
+  booktitle = {Proceedings of the 40th International Conference on Machine Learning (ICML)},
+  year      = {2023}
+}
+
+@misc{chen2023specsampling,
+  author        = {Chen, Charlie and Borgeaud, Sebastian and Irving, Geoffrey and Lespiau, Jean-Baptiste and Sifre, Laurent and Jumper, John},
+  title         = {Accelerating Large Language Model Decoding with Speculative Sampling},
+  year          = {2023},
+  eprint        = {2302.01318},
+  archivePrefix = {arXiv}
+}
+
+@misc{saxena2023pld,
+  author       = {Saxena, Apoorv},
+  title        = {Prompt Lookup Decoding},
+  howpublished = {\url{https://github.com/apoorvumang/prompt-lookup-decoding}},
+  year         = {2023}
+}
+
+%% ── Models ──────────────────────────────────────────────────────────────────
+@misc{dubey2024llama3,
+  author        = {{Llama Team, AI @ Meta}},
+  title         = {The {Llama} 3 Herd of Models},
+  year          = {2024},
+  eprint        = {2407.21783},
+  archivePrefix = {arXiv}
+}
+
+@misc{bai2023qwen,
+  author        = {Bai, Jinze and others},
+  title         = {Qwen Technical Report},
+  year          = {2023},
+  eprint        = {2309.16609},
+  archivePrefix = {arXiv}
+}
+
+@misc{mistralnemo,
+  author       = {{Mistral AI}},
+  title        = {Mistral {NeMo}},
+  howpublished = {\url{https://mistral.ai/news/mistral-nemo}},
+  year         = {2024}
+}
+
+%% ── Datasets ────────────────────────────────────────────────────────────────
+@misc{sharegpt,
+  title        = {{ShareGPT} Conversations ({ShareGPT\_Vicuna\_unfiltered})},
+  howpublished = {\url{https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered}},
+  year         = {2023}
+} % VERIFY the exact dataset revision used by the harness
+
+@misc{austin2021mbpp,
+  author        = {Austin, Jacob and Odena, Augustus and Nye, Maxwell and Bosma, Maarten and Michalewski, Henryk and Dohan, David and Jiang, Ellen and Cai, Carrie and Terry, Michael and Le, Quoc and Sutton, Charles},
+  title         = {Program Synthesis with Large Language Models},
+  year          = {2021},
+  eprint        = {2108.07732},
+  archivePrefix = {arXiv}
+}
+
+@misc{cobbe2021gsm8k,
+  author        = {Cobbe, Karl and Kosaraju, Vineet and Bavarian, Mohammad and Chen, Mark and Jun, Heewoo and Kaiser, Lukasz and Plappert, Matthias and Tworek, Jerry and Hilton, Jacob and Nakano, Reiichiro and Hesse, Christopher and Schulman, John},
+  title         = {Training Verifiers to Solve Math Word Problems},
+  year          = {2021},
+  eprint        = {2110.14168},
+  archivePrefix = {arXiv}
+}
+
+@inproceedings{hermann2015cnn,
+  author    = {Hermann, Karl Moritz and Ko{\v{c}}isk{\'y}, Tom{\'a}{\v{s}} and Grefenstette, Edward and Espeholt, Lasse and Kay, Will and Suleyman, Mustafa and Blunsom, Phil},
+  title     = {Teaching Machines to Read and Comprehend},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year      = {2015}
+}
+
+%% ── Benchmarking and evaluation ─────────────────────────────────────────────
+@inproceedings{reddi2020mlperf,
+  author    = {Reddi, Vijay Janapa and others},
+  title     = {{MLPerf} Inference Benchmark},
+  booktitle = {47th ACM/IEEE Annual International Symposium on Computer Architecture (ISCA)},
+  year      = {2020}
+}
+
+@misc{agrawal2024etalon,
+  author        = {Agrawal, Amey and Agarwal, Anmol and Kedia, Nitin and Mohan, Jayashree and Kundu, Souvik and Kwatra, Nipun and Ramjee, Ramachandran and Tumanov, Alexey},
+  title         = {Etalon: Holistic Performance Evaluation Framework for {LLM} Inference Systems},
+  year          = {2024},
+  eprint        = {2407.07000},
+  archivePrefix = {arXiv}
+} % VERIFY eprint number and title (earlier version titled "Metron")
+
+@misc{liu2024andes,
+  author        = {Liu, Jiachen and Wu, Zhiyu and Chung, Jae-Won and Lai, Fan and Lee, Myungjin and Chowdhury, Mosharaf},
+  title         = {Andes: Defining and Enhancing Quality-of-Experience in {LLM}-Based Text Streaming Services},
+  year          = {2024},
+  eprint        = {2404.16283},
+  archivePrefix = {arXiv}
+} % VERIFY
+
+@inproceedings{agrawal2024vidur,
+  author    = {Agrawal, Amey and Kedia, Nitin and Mohan, Jayashree and Panwar, Ashish and Kwatra, Nipun and Gulavani, Bhargav S. and Ramjee, Ramachandran and Tumanov, Alexey},
+  title     = {Vidur: A Large-Scale Simulation Framework for {LLM} Inference},
+  booktitle = {Proceedings of Machine Learning and Systems (MLSys)},
+  year      = {2024}
+}
+
+@misc{llmperf,
+  author       = {{Anyscale}},
+  title        = {{LLMPerf}},
+  howpublished = {\url{https://github.com/ray-project/llmperf}},
+  year         = {2024}
+}
+
+%% ── Performance-engineering methodology ─────────────────────────────────────
+@inproceedings{schroeder2006open,
+  author    = {Schroeder, Bianca and Wierman, Adam and Harchol-Balter, Mor},
+  title     = {Open Versus Closed: A Cautionary Tale},
+  booktitle = {3rd USENIX Symposium on Networked Systems Design and Implementation (NSDI)},
+  year      = {2006}
+}
+
+@misc{tene2015latency,
+  author       = {Tene, Gil},
+  title        = {How {NOT} to Measure Latency},
+  howpublished = {Talk, Strange Loop},
+  year         = {2015}
+} % VERIFY venue/year of the cited version
+
+@article{little1961,
+  author  = {Little, John D. C.},
+  title   = {A Proof for the Queuing Formula: {$L = \lambda W$}},
+  journal = {Operations Research},
+  volume  = {9},
+  number  = {3},
+  pages   = {383--387},
+  year    = {1961}
+}
