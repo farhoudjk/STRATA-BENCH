@@ -59,7 +59,7 @@ USECOLS = [
     "rate_label", "max_concurrent", "max_num_seqs", "send_time", "ttft_s", "e2e_s",
     "output_tokens", "target_output_tokens", "completion_ratio", "status",
     "kv_cache_usage_pct", "num_waiting_seqs", "num_running_seqs",
-    "num_preemptions", "num_preemptions_delta", "itl_p95_ms", "itl_max_ms",
+    "num_preemptions", "num_preemptions_delta", "itl_p50_ms", "itl_p95_ms", "itl_max_ms",
 ]
 
 
