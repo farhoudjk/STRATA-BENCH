@@ -8,14 +8,7 @@ practitioners can evaluate the deployment they care about. This section formalis
 
 \begin{figure*}[t]
   \centering
-  \IfFileExists{figures/methodology.pdf}{%
-    \includegraphics[width=0.92\textwidth]{figures/methodology.pdf}%
-  }{\IfFileExists{figures/methodology.jpg}{%
-    \includegraphics[width=0.92\textwidth]{figures/methodology.jpg}%
-  }{%
-    \fbox{\parbox[c][4.2cm][c]{0.9\textwidth}{\centering\small
-      Methodology overview figure: place it at \texttt{figures/methodology.pdf}}}%
-  }}
+  \includegraphics[width=0.92\textwidth]{methodology}
   \caption{Overview of \sysname. A benchmark configuration (workload, load generation, model,
   scheduler configuration) is executed by the experiment orchestrator against each serving engine.
   The evaluation and monitoring harness measures every request from the client side, polls the
