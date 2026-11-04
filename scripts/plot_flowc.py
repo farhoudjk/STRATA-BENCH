@@ -76,7 +76,7 @@ def style(fs: float = 1.0):
 
 
 # Paper font scale per figure: C2 and C4 are set at column width, the others at text width.
-PAPER_FS = {"c2": 1.12, "c3": 1.22, "c4": 1.22, "c56": 1.22}
+PAPER_FS = {"c2": 1.12, "c3": 1.22, "c4": 1.22, "c56": 1.22, "c8": 1.12}
 PAPER = False  # set by --paper: drop in-figure titles that duplicate LaTeX captions
 
 
@@ -317,6 +317,44 @@ def c56(d, out):
     return pd.DataFrame(recs)
 
 
+# ── C8: who pays the wait (slowdown by task) ────────────────────────────────
+def c8(d, out):
+    """Median slowdown E2E / streaming time per task: under first-come, first-served queueing every
+    request waits about as long, so the shortest requests are slowed the most."""
+    s = d[(d.workload_name == "mixed_real") & (d.max_num_seqs == 256) & d.rate_label.isin(RATES) & d.finished
+          & (d.output_tokens > 1)].copy()
+    s["slowdown"] = s.e2e_user / (s.e2e_s - s.ttft_s)
+    tasks = ["code", "summarization", "chat", "reasoning"]
+    fig, axes = plt.subplots(1, 3, figsize=(3.45, 1.95), sharey=True, gridspec_kw=dict(wspace=0.1))
+    rows = []
+    for ax, (m, mlab) in zip(axes, MODEL.items()):
+        # dodge engines horizontally and draw vLLM last, so overlapping lines near 1 stay visible
+        for k, e in ((1, "sglang"), (2, "tensorrt-llm"), (0, "vllm")):
+            st = ENG[e]
+            g = s[(s.model == m) & (s.engine == e)]
+            v = g.groupby("task_type").slowdown.median().reindex(tasks)
+            w = g.groupby("task_type").ttft_user.median().reindex(tasks)
+            n = g.groupby("task_type").size().reindex(tasks)
+            rows += [dict(model=m, engine=e, task=t, slowdown_p50=v[t], ttft_p50=w[t], n=n[t]) for t in tasks]
+            ax.plot(np.arange(4) + (k - 1) * 0.2, v.values, color=st["color"], marker=st["marker"],
+                    markersize=3.4, linewidth=1.1, markeredgecolor="white", markeredgewidth=0.4,
+                    zorder=4 if e == "vllm" else 3)
+        ax.axhline(1, color=INK2, linestyle=(0, (3, 2)), linewidth=0.7, zorder=1)
+        ax.set_yscale("log"); plain_log(ax.yaxis); ax.set_ylim(0.8, 250)
+        ax.set_xticks(range(4), ["code", "summ.", "chat", "reason."], fontsize=fz(5.6), rotation=40, ha="right",
+                      rotation_mode="anchor")
+        ax.set_xlim(-0.4, 3.4)
+        ax.set_title(mlab, loc="center", fontsize=fz(6.2), pad=3)
+        ax.grid(axis="x", visible=False)
+    axes[0].set_ylabel("Median slowdown\n(E2E / streaming time)")
+    fig.legend(handles=eng_handles(True), loc="upper center", ncol=3, bbox_to_anchor=(0.5, -0.06),
+               handlelength=1.6)
+    fig.suptitle("C8 · Who pays the wait: slowdown by task (mixed_real, conc. 256, max_num_seqs 256, Poisson rates)",
+                 x=0.06, ha="left", y=1.02, fontsize=fz(7.5))
+    save(fig, out, "fig_c8_slowdown_by_task")
+    return pd.DataFrame(rows)
+
+
 # ── C7: max_num_seqs ─────────────────────────────────────────────────────────
 def c7(d, out):
     s = d[d.workload_name == "mixed_real"]
@@ -399,7 +437,7 @@ def main():
     d = load(a.rq1_dir, a.cache or a.rq1_dir / "rq1_flowc.parquet")
     for name, fn, csv in ((("c2", c2, "c2_load_response"), ("c3", c3, "c3_streaming_quality"), ("c4", c4, "c4_e2e"),
                            ("c56", c56, "c5_c6_outcomes_goodput"), ("c7", c7, "c7_max_num_seqs"),
-                           ("s1", s1, "s1_tight_tpot_goodput"))):
+                           ("c8", c8, "c8_slowdown_by_task"), ("s1", s1, "s1_tight_tpot_goodput"))):
         style(fs.get(name, 1.0))
         fn(d, a.out).to_csv(a.out / f"{csv}.csv", index=False)
     print(f"Done → {a.out}/")
