@@ -22,6 +22,7 @@ Main figures use concurrency 256, max_num_seqs 256 unless stated.
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 import numpy as np
@@ -65,8 +66,22 @@ def style():
     })
 
 
+PAPER = False  # set by --paper: drop in-figure titles that duplicate LaTeX captions
+
+
 def save(fig, out, name):
+    if PAPER:
+        if fig._suptitle is not None:
+            fig._suptitle.set_visible(False)
+        for ax in fig.axes:
+            t = ax.get_title(loc="left")
+            if "conc." in t:            # context line: belongs in the caption
+                ax.set_title("", loc="left")
+            elif t:
+                ax.set_title(re.sub(r"^[CS]\d+ · ", "", t), loc="left")
     for ext in ("pdf", "png"):
+        if PAPER and ext == "png":
+            continue
         fig.savefig(out / f"{name}.{ext}", dpi=300 if ext == "png" else None)
     plt.close(fig)
     print(f"  wrote {name}")
@@ -352,7 +367,10 @@ def main():
     ap.add_argument("--rq1-dir", type=Path, required=True)
     ap.add_argument("--out", type=Path, default=Path("docs/figures/flowc"))
     ap.add_argument("--cache", type=Path, help="default: <rq1-dir>/rq1_flowc.parquet")
+    ap.add_argument("--paper", action="store_true", help="PDF only, without in-figure titles (captions go in LaTeX)")
     a = ap.parse_args()
+    global PAPER
+    PAPER = a.paper
     a.out.mkdir(parents=True, exist_ok=True)
     style()
     d = load(a.rq1_dir, a.cache or a.rq1_dir / "rq1_flowc.parquet")

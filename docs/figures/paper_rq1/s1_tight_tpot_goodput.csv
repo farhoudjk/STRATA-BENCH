@@ -1,0 +1,55 @@
+tier,workload,model,engine,goodput
+strict 2 s / 200 ms,mixed_real,llama31_8b,vllm,88.24
+strict 2 s / 200 ms,mixed_real,llama31_8b,sglang,86.6
+strict 2 s / 200 ms,mixed_real,llama31_8b,tensorrt-llm,28.360000000000003
+strict 2 s / 200 ms,mixed_real,mistral_nemo_12b,vllm,93.12
+strict 2 s / 200 ms,mixed_real,mistral_nemo_12b,sglang,80.24
+strict 2 s / 200 ms,mixed_real,mistral_nemo_12b,tensorrt-llm,40.48
+strict 2 s / 200 ms,mixed_real,qwen15_14b,vllm,25.040000000000003
+strict 2 s / 200 ms,mixed_real,qwen15_14b,sglang,4.16
+strict 2 s / 200 ms,mixed_real,qwen15_14b,tensorrt-llm,1.72
+strict 2 s / 200 ms,chat_multiturn,llama31_8b,vllm,99.76596456034771
+strict 2 s / 200 ms,chat_multiturn,llama31_8b,sglang,99.79906229068989
+strict 2 s / 200 ms,chat_multiturn,llama31_8b,tensorrt-llm,100.0
+strict 2 s / 200 ms,chat_multiturn,mistral_nemo_12b,vllm,82.6992103374013
+strict 2 s / 200 ms,chat_multiturn,mistral_nemo_12b,sglang,82.97413793103449
+strict 2 s / 200 ms,chat_multiturn,mistral_nemo_12b,tensorrt-llm,80.13293943870015
+strict 2 s / 200 ms,chat_multiturn,qwen15_14b,vllm,25.394402035623408
+strict 2 s / 200 ms,chat_multiturn,qwen15_14b,sglang,20.30534351145038
+strict 2 s / 200 ms,chat_multiturn,qwen15_14b,tensorrt-llm,15.165394402035624
+tight TPOT 4 s / 50 ms,mixed_real,llama31_8b,vllm,51.160000000000004
+tight TPOT 4 s / 50 ms,mixed_real,llama31_8b,sglang,42.6
+tight TPOT 4 s / 50 ms,mixed_real,llama31_8b,tensorrt-llm,28.84
+tight TPOT 4 s / 50 ms,mixed_real,mistral_nemo_12b,vllm,51.92
+tight TPOT 4 s / 50 ms,mixed_real,mistral_nemo_12b,sglang,44.519999999999996
+tight TPOT 4 s / 50 ms,mixed_real,mistral_nemo_12b,tensorrt-llm,41.64
+tight TPOT 4 s / 50 ms,mixed_real,qwen15_14b,vllm,2.0
+tight TPOT 4 s / 50 ms,mixed_real,qwen15_14b,sglang,2.52
+tight TPOT 4 s / 50 ms,mixed_real,qwen15_14b,tensorrt-llm,2.0
+tight TPOT 4 s / 50 ms,chat_multiturn,llama31_8b,vllm,73.75459712470746
+tight TPOT 4 s / 50 ms,chat_multiturn,llama31_8b,sglang,60.31480241125251
+tight TPOT 4 s / 50 ms,chat_multiturn,llama31_8b,tensorrt-llm,96.32721202003339
+tight TPOT 4 s / 50 ms,chat_multiturn,mistral_nemo_12b,vllm,39.12419239052405
+tight TPOT 4 s / 50 ms,chat_multiturn,mistral_nemo_12b,sglang,28.304597701149426
+tight TPOT 4 s / 50 ms,chat_multiturn,mistral_nemo_12b,tensorrt-llm,77.99113737075332
+tight TPOT 4 s / 50 ms,chat_multiturn,qwen15_14b,vllm,3.0025445292620865
+tight TPOT 4 s / 50 ms,chat_multiturn,qwen15_14b,sglang,1.1195928753180662
+tight TPOT 4 s / 50 ms,chat_multiturn,qwen15_14b,tensorrt-llm,3.76590330788804
+TPOT only ≤ 50 ms,mixed_real,llama31_8b,vllm,51.160000000000004
+TPOT only ≤ 50 ms,mixed_real,llama31_8b,sglang,42.6
+TPOT only ≤ 50 ms,mixed_real,llama31_8b,tensorrt-llm,81.04
+TPOT only ≤ 50 ms,mixed_real,mistral_nemo_12b,vllm,51.92
+TPOT only ≤ 50 ms,mixed_real,mistral_nemo_12b,sglang,45.04
+TPOT only ≤ 50 ms,mixed_real,mistral_nemo_12b,tensorrt-llm,89.08
+TPOT only ≤ 50 ms,mixed_real,qwen15_14b,vllm,2.16
+TPOT only ≤ 50 ms,mixed_real,qwen15_14b,sglang,4.8
+TPOT only ≤ 50 ms,mixed_real,qwen15_14b,tensorrt-llm,56.36
+TPOT only ≤ 50 ms,chat_multiturn,llama31_8b,vllm,73.75459712470746
+TPOT only ≤ 50 ms,chat_multiturn,llama31_8b,sglang,60.31480241125251
+TPOT only ≤ 50 ms,chat_multiturn,llama31_8b,tensorrt-llm,96.32721202003339
+TPOT only ≤ 50 ms,chat_multiturn,mistral_nemo_12b,vllm,39.12419239052405
+TPOT only ≤ 50 ms,chat_multiturn,mistral_nemo_12b,sglang,28.304597701149426
+TPOT only ≤ 50 ms,chat_multiturn,mistral_nemo_12b,tensorrt-llm,77.99113737075332
+TPOT only ≤ 50 ms,chat_multiturn,qwen15_14b,vllm,3.2569974554707377
+TPOT only ≤ 50 ms,chat_multiturn,qwen15_14b,sglang,1.2213740458015268
+TPOT only ≤ 50 ms,chat_multiturn,qwen15_14b,tensorrt-llm,4.071246819338422
