@@ -47,16 +47,29 @@ STRICT = (2.0, 200.0)
 INK, INK2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 
 
-def style():
+FS = 1.0  # font scale; the paper versions set it per figure (see PAPER_FS)
+
+
+def fz(x: float) -> float:
+    return x * FS
+
+
+def style(fs: float = 1.0):
+    global FS
+    FS = fs
     plt.rcParams.update({
         "font.family": "sans-serif", "font.sans-serif": ["Linux Biolinum O", "Libertinus Sans", "DejaVu Sans"],
-        "font.size": 7, "axes.titlesize": 7.5, "axes.labelsize": 7, "xtick.labelsize": 6.5,
-        "ytick.labelsize": 6.5, "legend.fontsize": 6.5, "axes.edgecolor": INK2, "axes.labelcolor": INK,
+        "font.size": 7 * fs, "axes.titlesize": 7.5 * fs, "axes.labelsize": 7 * fs,
+        "xtick.labelsize": 6.5 * fs, "ytick.labelsize": 6.5 * fs, "legend.fontsize": 6.5 * fs, "axes.edgecolor": INK2, "axes.labelcolor": INK,
         "text.color": INK, "xtick.color": INK2, "ytick.color": INK2, "axes.spines.top": False,
         "axes.spines.right": False, "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.5,
         "axes.axisbelow": True, "legend.frameon": False, "savefig.bbox": "tight",
         "savefig.pad_inches": 0.03, "pdf.fonttype": 42, "ps.fonttype": 42,
     })
+
+
+# Paper font scale per figure (F4 is set at column width).
+PAPER_FS = {"f1": 1.25, "f2": 1.2, "f4": 1.12}
 
 
 class Saver:
@@ -133,12 +146,12 @@ def f1_payoff(s, save):
         M = np.array(rows)
         ax.imshow(M, cmap=cmap, norm=norm, aspect="auto")
         for (r, c), v in np.ndenumerate(M):
-            ax.text(c, r, f"{v:+.0f}%", ha="center", va="center", fontsize=6,
+            ax.text(c, r, f"{v:+.0f}%", ha="center", va="center", fontsize=fz(6),
                     color="white" if abs(v) >= 55 else INK)
-        ax.set_xticks(range(len(METRICS)), [m[1] for m in METRICS], fontsize=6)
+        ax.set_xticks(range(len(METRICS)), [m[1].replace(" ", "\n", 1) for m in METRICS], fontsize=fz(6))
         ax.xaxis.tick_top()
         if ax is axes[0]:
-            ax.set_yticks(range(len(labels)), [f"{s_} · {e_}" for s_, e_ in labels], fontsize=6)
+            ax.set_yticks(range(len(labels)), [f"{s_} · {e_}" for s_, e_ in labels], fontsize=fz(6))
         else:
             ax.set_yticks([])
         for k in (3, 6):
@@ -146,13 +159,13 @@ def f1_payoff(s, save):
         ax.grid(False)
         for sp in ax.spines.values():
             sp.set_visible(False)
-        ax.set_title(wlab, loc="left", pad=20, fontweight="bold")
+        ax.set_title(wlab, loc="left", pad=28 if FS > 1 else 20, fontweight="bold")
     sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
     cb = fig.colorbar(sm, ax=axes, orientation="horizontal", fraction=0.05, pad=0.04, aspect=50)
-    cb.set_label("Change vs. both features off (%)   ←  better   |   worse  →", fontsize=6.5)
+    cb.set_label("Change vs. both features off (%)   ←  better   |   worse  →", fontsize=fz(6.5))
     cb.outline.set_visible(False)
     fig.suptitle("RQ2 · What each prefill feature buys, per engine (Mistral-NeMo-12B, conc. 256, L40S)",
-                 x=0.06, ha="left", y=1.12, fontsize=7.5)
+                 x=0.06, ha="left", y=1.12, fontsize=fz(7.5))
     save(fig, "fig_rq2_1_payoff_matrix")
     return pd.DataFrame(recs)
 
@@ -178,13 +191,13 @@ def f2_prefix_turns(d, save):
         ax.set_xlabel("Conversation turn"); ax.set_ylabel(lab)
         sec = ax.secondary_xaxis("top")
         sec.set_xticks(prompt.index, [f"{p / 1000:.1f}k" if p >= 1000 else f"{p:.0f}" for p in prompt.values])
-        sec.tick_params(labelsize=5.8, colors=INK2)
-        sec.set_xlabel("median prompt tokens", fontsize=6, color=INK2)
+        sec.tick_params(labelsize=fz(5.8), colors=INK2)
+        sec.set_xlabel("median prompt tokens", fontsize=fz(6), color=INK2)
     handles = eng_handles() + [plt.Line2D([], [], color=INK2, label="prefix caching on"),
                                plt.Line2D([], [], color=INK2, linestyle=(0, (3, 1.5)), label="off")]
     fig.legend(handles=handles, loc="upper center", ncol=5, bbox_to_anchor=(0.5, -0.1))
     fig.suptitle("RQ2 · Prefix caching keeps TTFT flat as the conversation grows (chat_multiturn, chunking off)",
-                 x=0.06, ha="left", y=1.08, fontsize=7.5)
+                 x=0.06, ha="left", y=1.08, fontsize=fz(7.5))
     save(fig, "fig_rq2_2_prefix_by_turn")
     return pd.DataFrame(recs)
 
@@ -211,16 +224,16 @@ def f3_chunk_load(d, save):
                plt.Line2D([], [], color=INK2, linestyle=(0, (3, 1.5)), label="no chunking")]
     fig.legend(handles=handles, loc="upper center", ncol=2, bbox_to_anchor=(0.5, -0.1))
     fig.suptitle("RQ2 · Chunked prefill under load: only TensorRT-LLM gets faster first tokens "
-                 "(chat_real_long, prefix caching on)", x=0.06, ha="left", y=1.06, fontsize=7.5)
+                 "(chat_real_long, prefix caching on)", x=0.06, ha="left", y=1.06, fontsize=fz(7.5))
     save(fig, "fig_rq2_3_chunked_under_load")
     return pd.DataFrame(recs)
 
 
 # ── F4: chunked prefill and stalls ───────────────────────────────────────────
 def f4_chunk_stalls(d, save):
-    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.2), sharey=True, gridspec_kw=dict(wspace=0.08))
+    fig, axes = plt.subplots(1, 2, figsize=(3.45, 2.0), sharex=True, sharey=True, gridspec_kw=dict(wspace=0.1))
     recs = []
-    for ax, (w, wlab) in zip(axes, WL.items()):
+    for ax, w in zip(axes, WL):
         for e, st in ENG.items():
             for strat, ls in (("baseline_full_fp16_tp1", (0, (3, 1.5))), ("chunked_512_fp16_tp1", "-")):
                 g = d[(d.workload_name == w) & (d.engine == e) & (d.strategy_name == strat) & d.finished]
@@ -229,15 +242,17 @@ def f4_chunk_stalls(d, save):
                         linewidth=1.2)
                 recs.append(dict(workload=w, engine=e, strategy=strat, gap_p50_s=np.median(x),
                                  gap_p95_s=np.quantile(x, .95), share_over_1s=(x > 1).mean()))
-        ax.set_xscale("log"); plain_log(ax.xaxis)
+        ax.set_xscale("log"); plain_log(ax.xaxis); ax.set_xticks([0.1, 1, 10])
         ax.axvline(1, color=INK2, linestyle=(0, (1, 1.5)), linewidth=0.7)
-        ax.set_title(wlab, loc="left"); ax.set_xlabel("Longest token gap per request (s)")
-    axes[0].set_ylabel("Share of requests")
-    handles = eng_handles() + [plt.Line2D([], [], color=INK2, label="chunked prefill (512)"),
+        ax.set_title(w, loc="left", fontsize=fz(6.8), pad=3)
+        ax.set_xlabel("Longest gap (s)")
+    axes[0].set_ylabel("Share of requests"); axes[0].set_yticks([0, 0.5, 1], ["0", ".5", "1"])
+    handles = eng_handles() + [plt.Line2D([], [], color=INK2, label="chunked (512)"),
                                plt.Line2D([], [], color=INK2, linestyle=(0, (3, 1.5)), label="no chunking")]
-    fig.legend(handles=handles, loc="upper center", ncol=5, bbox_to_anchor=(0.5, -0.1))
+    fig.legend(handles=handles, loc="upper center", ncol=3, bbox_to_anchor=(0.5, -0.08), handlelength=1.6,
+               columnspacing=0.9)
     fig.suptitle("RQ2 · Chunked prefill removes prefill-induced stalls on vLLM and TensorRT-LLM, not on SGLang "
-                 "(prefix caching on)", x=0.06, ha="left", y=1.06, fontsize=7.5)
+                 "(prefix caching on)", x=0.06, ha="left", y=1.06, fontsize=fz(7.5))
     save(fig, "fig_rq2_4_chunked_stalls")
     return pd.DataFrame(recs)
 
@@ -262,7 +277,7 @@ def s1_tradeoff(s, save):
                                     plt.Line2D([], [], color=INK2, marker="o", linestyle="", label="chunked (512)")]
     fig.legend(handles=handles, loc="upper center", ncol=5, bbox_to_anchor=(0.5, -0.1))
     fig.suptitle("RQ2 (supplementary) · Where chunked prefill moves each engine (arrow: off → on; down-left is better)",
-                 x=0.06, ha="left", y=1.04, fontsize=7.5)
+                 x=0.06, ha="left", y=1.04, fontsize=fz(7.5))
     save(fig, "fig_rq2_s1_chunk_tradeoff")
 
 
@@ -277,15 +292,15 @@ def s2_goodput(s, save):
                        for e in ENG] for o in order])
         ax.imshow(M, cmap=cmap, vmin=0, vmax=100, aspect="auto")
         for (r, c), v in np.ndenumerate(M):
-            ax.text(c, r, f"{v:.0f}", ha="center", va="center", fontsize=6.5, color="white" if v >= 55 else INK)
-        ax.set_xticks(range(len(ENG)), [v["label"] for v in ENG.values()], fontsize=6)
-        ax.set_yticks(range(len(order)) if k == 0 else [], names if k == 0 else [], fontsize=6)
+            ax.text(c, r, f"{v:.0f}", ha="center", va="center", fontsize=fz(6.5), color="white" if v >= 55 else INK)
+        ax.set_xticks(range(len(ENG)), [v["label"] for v in ENG.values()], fontsize=fz(6))
+        ax.set_yticks(range(len(order)) if k == 0 else [], names if k == 0 else [], fontsize=fz(6))
         ax.grid(False)
         for sp in ax.spines.values():
             sp.set_visible(False)
         ax.set_title(wlab, loc="left")
     fig.suptitle("RQ2 (supplementary) · Strict goodput (% of requests with TTFT ≤ 2 s and TPOT ≤ 200 ms)",
-                 x=0.06, ha="left", y=1.08, fontsize=7.5)
+                 x=0.06, ha="left", y=1.08, fontsize=fz(7.5))
     save(fig, "fig_rq2_s2_goodput")
 
 
@@ -299,16 +314,16 @@ def main():
     a.out.mkdir(parents=True, exist_ok=True)
     if a.preview_dir:
         a.preview_dir.mkdir(parents=True, exist_ok=True)
-    style()
+    fs = PAPER_FS if a.paper else {}
     save = Saver(a.out, a.preview_dir, a.paper)
     d = load(a.rq2)
     s = summary(d)
     s.to_csv(a.out / "rq2_summary.csv", index=False)
-    f1_payoff(s, save).to_csv(a.out / "rq2_1_payoff_matrix.csv", index=False)
-    f2_prefix_turns(d, save).to_csv(a.out / "rq2_2_prefix_by_turn.csv", index=False)
-    f3_chunk_load(d, save).to_csv(a.out / "rq2_3_chunked_under_load.csv", index=False)
-    f4_chunk_stalls(d, save).to_csv(a.out / "rq2_4_chunked_stalls.csv", index=False)
-    s1_tradeoff(s, save)
+    style(fs.get("f1", 1.0)); f1_payoff(s, save).to_csv(a.out / "rq2_1_payoff_matrix.csv", index=False)
+    style(fs.get("f2", 1.0)); f2_prefix_turns(d, save).to_csv(a.out / "rq2_2_prefix_by_turn.csv", index=False)
+    style(fs.get("f3", 1.0)); f3_chunk_load(d, save).to_csv(a.out / "rq2_3_chunked_under_load.csv", index=False)
+    style(fs.get("f4", 1.0)); f4_chunk_stalls(d, save).to_csv(a.out / "rq2_4_chunked_stalls.csv", index=False)
+    style(); s1_tradeoff(s, save)
     s2_goodput(s, save)
     print(f"Done → {a.out}/")
 

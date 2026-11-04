@@ -43,11 +43,20 @@ MODEL = {"llama31_8b": "Llama-3.1-8B", "mistral_nemo_12b": "Mistral-NeMo-12B", "
 INK, INK2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 
 
-def style():
+FS = 1.0  # font scale; the paper versions set it per figure (see PAPER_FS)
+
+
+def fz(x: float) -> float:
+    return x * FS
+
+
+def style(fs: float = 1.0):
+    global FS
+    FS = fs
     plt.rcParams.update({
         "font.family": "sans-serif", "font.sans-serif": ["Linux Biolinum O", "Libertinus Sans", "DejaVu Sans"],
-        "font.size": 7, "axes.titlesize": 7.5, "axes.labelsize": 7, "xtick.labelsize": 6.5,
-        "ytick.labelsize": 6.5, "legend.fontsize": 6.3, "axes.edgecolor": INK2, "axes.labelcolor": INK,
+        "font.size": 7 * fs, "axes.titlesize": 7.5 * fs, "axes.labelsize": 7 * fs,
+        "xtick.labelsize": 6.5 * fs, "ytick.labelsize": 6.5 * fs, "legend.fontsize": 6.3 * fs, "axes.edgecolor": INK2, "axes.labelcolor": INK,
         "text.color": INK, "xtick.color": INK2, "ytick.color": INK2, "axes.spines.top": False,
         "axes.spines.right": False, "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.5,
         "axes.axisbelow": True, "legend.frameon": False, "savefig.bbox": "tight",
@@ -102,7 +111,7 @@ def fig_main(summ: pd.DataFrame, out: Path):
     panels = [("kv_peak", "Peak KV-cache use (%)", False, (0, 105)),
               ("ttft_med", "Median TTFT (s)", True, (0.05, 400)),
               ("tpot_med", "Median TPOT (ms)", True, (30, 700))]
-    fig, axes = plt.subplots(1, 3, figsize=(7.0, 2.7), sharey=True, gridspec_kw=dict(wspace=0.08))
+    fig, axes = plt.subplots(1, 3, figsize=(7.0, 2.8), sharey=True, gridspec_kw=dict(wspace=0.08))
     for ax, (col, lab, logx, lim) in zip(axes, panels):
         for i, (m, e) in enumerate(rows):
             if i % 3 == 0 and (i // 3) % 2 == 0:
@@ -126,11 +135,11 @@ def fig_main(summ: pd.DataFrame, out: Path):
         ax.set_xlim(*lim); ax.set_xlabel(lab); ax.grid(axis="y", visible=False)
         if col == "tpot_med":
             ax.axvline(200, color=INK2, linestyle=(0, (3, 2)), linewidth=0.7)
-            ax.text(205, len(rows) - 0.6, "200 ms SLO", fontsize=5.8, color=INK2, va="bottom")
+            ax.text(208, -0.75, "200 ms SLO", fontsize=fz(5.8), color=INK2, va="center")
         if col == "ttft_med":
             ax.axvline(2, color=INK2, linestyle=(0, (3, 2)), linewidth=0.7)
-            ax.text(2.1, len(rows) - 0.6, "2 s SLO", fontsize=5.8, color=INK2, va="bottom")
-    axes[0].set_yticks(range(len(rows)), [f"{MODEL[m]} · {ENG[e]['label']}" for m, e in rows], fontsize=6)
+            ax.text(2.15, -0.75, "2 s SLO", fontsize=fz(5.8), color=INK2, va="center")
+    axes[0].set_yticks(range(len(rows)), [f"{MODEL[m]} · {ENG[e]['label']}" for m, e in rows], fontsize=fz(6))
     axes[0].set_ylim(len(rows) - 0.5, -0.9)
     handles = [plt.Line2D([], [], color=v["color"], marker=v["marker"], linestyle="", markersize=4, label=v["label"])
                for v in ENG.values()]
@@ -175,7 +184,7 @@ def fig_appendix(l40: pd.DataFrame, gb: pd.DataFrame, tasks: pd.DataFrame, l40_t
                        for m, (c, mk) in shades.items()] +
               [plt.Line2D([], [], color=INK2, marker="o", markerfacecolor="white", linestyle="", label="L40S"),
                plt.Line2D([], [], color=INK2, marker="o", linestyle="", label="GB10")],
-              loc="upper left", fontsize=5.6, handletextpad=0.2)
+              loc="upper left", fontsize=fz(5.6), handletextpad=0.2)
 
     rows = [(m, e) for m in MODEL for e in ENG]
     other = ["chat", "code", "summarization"]
@@ -194,7 +203,7 @@ def fig_appendix(l40: pd.DataFrame, gb: pd.DataFrame, tasks: pd.DataFrame, l40_t
         ax.set_xlim(0, 100); ax.set_xlabel("Share of GB10 requests (%)"); ax.grid(axis="y", visible=False)
         ax.set_title(title, loc="left"); ax.set_ylim(len(rows) - 0.5, -0.5)
         ax.set_yticks(range(len(rows)), [f"{MODEL[m].split('-')[0]} · {ENG[e]['label']}" for m, e in rows]
-                      if ax is axes[1] else [], fontsize=5.8)
+                      if ax is axes[1] else [], fontsize=fz(5.8))
         if ax is axes[2]:
             ax.tick_params(axis="y", length=0)
     axes[1].yaxis.set_tick_params(pad=1)
@@ -204,7 +213,7 @@ def fig_appendix(l40: pd.DataFrame, gb: pd.DataFrame, tasks: pd.DataFrame, l40_t
                                       label="not finished in 300 s"),
                         plt.Line2D([], [], marker="D", markerfacecolor="white", markeredgecolor=INK, linestyle="",
                                    markersize=3.6, label="finished on the L40S")],
-               loc="upper center", bbox_to_anchor=(0.62, -0.02), ncol=4, fontsize=5.9)
+               loc="upper center", bbox_to_anchor=(0.62, -0.02), ncol=4, fontsize=fz(5.9))
     fig.savefig(out / "fig_appendix_a6_gb10.pdf")
     plt.close(fig)
 
@@ -218,13 +227,14 @@ def main():
     a = ap.parse_args()
     for p in (a.out, a.appendix_out):
         p.mkdir(parents=True, exist_ok=True)
-    style()
     gb, tasks = load_gb10(a.gb10_report)
     l40 = load_l40s(a.rq1_dir)
     summ = pd.concat([summarise(l40, "L40S"), summarise(gb, "GB10")], ignore_index=True)
     summ.to_csv(a.out / "rq4_platform_summary.csv", index=False)
     tasks.to_csv(a.appendix_out / "appendix_a6_gb10_tasks.csv", index=False)
+    style(1.2)  # main figure: paper font scale
     fig_main(summ, a.out)
+    style()
     fig_appendix(l40, gb, tasks, l40s_task_outcomes(a.rq1_dir), a.appendix_out)
     print(summ.pivot_table(index=["model", "engine"], columns="platform",
                            values=["ttft_med", "tpot_med", "kv_peak", "completion"]).round(2).to_string())

@@ -44,16 +44,29 @@ STRICT, RELAXED = (2.0, 200.0), (4.0, 500.0)
 INK, INK2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 
 
-def style():
+FS = 1.0  # font scale; the paper versions set it per figure (see PAPER_FS)
+
+
+def fz(x: float) -> float:
+    return x * FS
+
+
+def style(fs: float = 1.0):
+    global FS
+    FS = fs
     plt.rcParams.update({
         "font.family": "sans-serif", "font.sans-serif": ["Linux Biolinum O", "Libertinus Sans", "DejaVu Sans"],
-        "font.size": 7, "axes.titlesize": 7.5, "axes.labelsize": 7, "xtick.labelsize": 6.5,
-        "ytick.labelsize": 6.5, "legend.fontsize": 6.5, "axes.edgecolor": INK2, "axes.labelcolor": INK,
+        "font.size": 7 * fs, "axes.titlesize": 7.5 * fs, "axes.labelsize": 7 * fs,
+        "xtick.labelsize": 6.5 * fs, "ytick.labelsize": 6.5 * fs, "legend.fontsize": 6.5 * fs, "axes.edgecolor": INK2, "axes.labelcolor": INK,
         "text.color": INK, "xtick.color": INK2, "ytick.color": INK2, "axes.spines.top": False,
         "axes.spines.right": False, "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.5,
         "axes.axisbelow": True, "legend.frameon": False, "savefig.bbox": "tight",
         "savefig.pad_inches": 0.03, "pdf.fonttype": 42, "ps.fonttype": 42,
     })
+
+
+# Paper font scale per figure (F2 is set at column width).
+PAPER_FS = {"f1": 1.2, "f2": 1.15, "f3": 1.25}
 
 
 class Saver:
@@ -137,11 +150,12 @@ def f1_payoff(s, save):
     ax.imshow(C, cmap=cmap, norm=norm, aspect="auto")
     for (r, c), v in np.ndenumerate(V):
         unit = " pp" if METRICS[c][2] == "pp" else "%"
-        ax.text(c, r, f"{v:+.0f}{unit}", ha="center", va="center", fontsize=5.8,
+        ax.text(c, r, f"{v:+.0f}{unit}", ha="center", va="center", fontsize=fz(5.8),
                 color="white" if abs(C[r, c]) >= 40 else INK)
-    ax.set_xticks(range(len(METRICS)), [m[1] for m in METRICS], fontsize=6.2)
+    ax.set_xticks(range(len(METRICS)), [m[1].replace(" ", "\n", 1) if len(m[1]) > 9 else m[1] for m in METRICS],
+                  fontsize=fz(6.2))
     ax.xaxis.tick_top()
-    ax.set_yticks(range(len(labels)), labels, fontsize=6)
+    ax.set_yticks(range(len(labels)), labels, fontsize=fz(6))
     for k in (3, 6, 9):
         ax.axhline(k - 0.5, color="white", linewidth=2 if k != 6 else 3.5)
     ax.grid(False)
@@ -149,10 +163,10 @@ def f1_payoff(s, save):
         sp.set_visible(False)
     sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
     cb = fig.colorbar(sm, ax=ax, orientation="horizontal", fraction=0.04, pad=0.03, aspect=50)
-    cb.set_label("Colour: purple = better, red = worse (throughput and goodput: higher is better)", fontsize=6.5)
+    cb.set_label("Colour: purple = better, red = worse (throughput and goodput: higher is better)", fontsize=fz(6.5))
     cb.outline.set_visible(False)
     fig.suptitle("RQ3 · What n-gram speculative decoding (k = 3) changes, per engine "
-                 "(Mistral-NeMo-12B, conc. 256, L40S; vs. no speculation)", x=0.02, ha="left", y=1.02, fontsize=7.5)
+                 "(Mistral-NeMo-12B, conc. 256, L40S; vs. no speculation)", x=0.02, ha="left", y=1.02, fontsize=fz(7.5))
     save(fig, "fig_rq3_1_payoff_matrix")
     return pd.DataFrame(recs)
 
@@ -160,7 +174,7 @@ def f1_payoff(s, save):
 # ── F2: where it pays (task type) ────────────────────────────────────────────
 def f2_tasks(d, save):
     m = d[(d.workload_name == "mixed_real") & (d.max_num_seqs == 64) & d.finished]
-    fig, ax = plt.subplots(figsize=(3.33, 2.3))
+    fig, ax = plt.subplots(figsize=(3.4, 2.4))
     recs = []
     for i, task in enumerate(TASKS):
         ax.axhspan(i - 0.42, i + 0.42, color="#f4f3f0" if i % 2 == 0 else "white", linewidth=0, zorder=0)
@@ -173,13 +187,13 @@ def f2_tasks(d, save):
             ax.plot([0, v], [y, y], color=st["color"], linewidth=1.2, zorder=2)
             ax.scatter(v, y, s=20, color=st["color"], marker=st["marker"], edgecolor="white", linewidth=0.4, zorder=3)
             ax.text(v + (1.5 if v >= 0 else -1.5), y, f"{v:+.0f}%", va="center", ha="left" if v >= 0 else "right",
-                    fontsize=5.6, color=INK2)
+                    fontsize=fz(5.6), color=INK2)
     out = m[m.strategy_name == BASE].groupby("task_type").output_tokens.median()
-    ax.set_yticks(range(len(TASKS)), [f"{t}\n({out[t]:.0f} tok)" for t in TASKS], fontsize=6)
+    ax.set_yticks(range(len(TASKS)), [f"{t}\n({out[t]:.0f} tok)" for t in TASKS], fontsize=fz(6))
     ax.invert_yaxis(); ax.axvline(0, color=INK, linewidth=0.8); ax.grid(axis="y", visible=False)
     ax.set_xlim(-48, 40)
     ax.set_xlabel("TPOT p50 change with n-gram (%)   ←  faster   |   slower  →")
-    ax.legend(handles=eng_handles(), loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=3, fontsize=6)
+    ax.legend(handles=eng_handles(), loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=3, fontsize=fz(6))
     ax.set_title("Where it pays: by task type\n(mixed_real, max_num_seqs 64; median output tokens)", loc="left")
     save(fig, "fig_rq3_2_by_task")
     return pd.DataFrame(recs)
@@ -187,7 +201,8 @@ def f2_tasks(d, save):
 
 # ── F3: when it pays (load) ──────────────────────────────────────────────────
 def f3_load(d, save):
-    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.2), sharey=True, gridspec_kw=dict(wspace=0.08))
+    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.2), sharey=True,
+                             gridspec_kw=dict(wspace=0.08))
     recs = []
     for ax, w in zip(axes, WL):
         for e, st in ENG.items():
@@ -210,7 +225,7 @@ def f3_load(d, save):
                                    plt.Line2D([], [], color=INK2, linestyle=(0, (3, 1.5)), label="32")]
     fig.legend(handles=handles, loc="upper center", ncol=5, bbox_to_anchor=(0.5, -0.1))
     fig.suptitle("RQ3 · When it pays: the gain shrinks or reverses as load grows (TensorRT-LLM: overlap "
-                 "scheduler off under n-gram)", x=0.06, ha="left", y=1.05, fontsize=7.5)
+                 "scheduler off under n-gram)", x=0.06, ha="left", y=1.05, fontsize=fz(7.5))
     save(fig, "fig_rq3_3_by_load")
     return pd.DataFrame(recs)
 
@@ -230,25 +245,25 @@ def f4_trap(s, save):
                edgecolor=[ENG[e]["color"] for e in ENG], linewidth=0.8)
         for xi, v in zip(x + (k - 0.5) * 0.36, vals):
             ax.text(xi, v + (2 if v >= 0 else -2), f"{v:+.0f}%", ha="center", va="bottom" if v >= 0 else "top",
-                    fontsize=6, color=INK)
+                    fontsize=fz(6), color=INK)
         recs += [dict(engine=e, metric=m, change=v) for e, v in zip(ENG, vals)]
     ax.axhline(0, color=INK, linewidth=0.8)
     ax.set_xticks(x, [v["label"] for v in ENG.values()]); ax.grid(axis="x", visible=False)
     ax.set_ylabel("Change with n-gram (%)"); ax.set_ylim(-30, 75)
     ax.legend(handles=[plt.Rectangle((0, 0), 1, 1, facecolor=INK2, alpha=0.35, label=names[0][1]),
                        plt.Rectangle((0, 0), 1, 1, facecolor=INK2, label=names[1][1])],
-              loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2, fontsize=6)
+              loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2, fontsize=fz(6))
     ax.set_title("Same runs, opposite verdicts (mixed_real, max_num_seqs 64)", loc="left")
     bx = axes[1]
     tp = [[s.loc[("mixed_real", 64, e, st_)].tok_per_chunk for st_ in (BASE, SPEC)] for e in ENG]
     for i, (e, st) in enumerate(ENG.items()):
         bx.plot([0, 1], tp[i], color=st["color"], marker=st["marker"], markersize=4.5, markeredgecolor="white")
-        bx.text(1.06, tp[i][1], f"{tp[i][1]:.2f}", va="center", fontsize=6, color=INK2)
+        bx.text(1.06, tp[i][1], f"{tp[i][1]:.2f}", va="center", fontsize=fz(6), color=INK2)
     bx.set_xticks([0, 1], ["no speculation", "n-gram"]); bx.set_xlim(-0.2, 1.3)
     bx.grid(axis="x", visible=False); bx.set_ylabel("Tokens per streamed chunk (median)")
     bx.set_title("Why: speculation streams\nseveral tokens per chunk", loc="left")
     fig.suptitle("RQ3 · Measurement trap: per-chunk gaps make speculation look slower than it is",
-                 x=0.06, ha="left", y=1.14, fontsize=7.5)
+                 x=0.06, ha="left", y=1.14, fontsize=fz(7.5))
     save(fig, "fig_rq3_4_measurement_trap")
     return pd.DataFrame(recs)
 
@@ -263,12 +278,12 @@ def s1_goodput(s, save):
         M = np.array([[s.loc[(w, q, e, st_)][col] for e in ENG for st_ in (BASE, SPEC)] for w, q in cells])
         ax.imshow(M, cmap=cmap, vmin=0, vmax=100, aspect="auto")
         for (r, c), v in np.ndenumerate(M):
-            ax.text(c, r, f"{v:.0f}", ha="center", va="center", fontsize=6.3, color="white" if v >= 55 else INK)
-        ax.set_xticks(range(6), ["base", "n-gram"] * 3, fontsize=5.8)
+            ax.text(c, r, f"{v:.0f}", ha="center", va="center", fontsize=fz(6.3), color="white" if v >= 55 else INK)
+        ax.set_xticks(range(6), ["base", "n-gram"] * 3, fontsize=fz(5.8))
         for j, e in enumerate(ENG):
-            ax.text(2 * j + 0.5, len(cells) - 0.5 + 0.95, ENG[e]["label"], ha="center", va="top", fontsize=6.2)
+            ax.text(2 * j + 0.5, len(cells) - 0.5 + 0.95, ENG[e]["label"], ha="center", va="top", fontsize=fz(6.2))
         ax.set_yticks(range(len(cells)) if k == 0 else [],
-                      [f"{w} · seqs {q}" for w, q in cells] if k == 0 else [], fontsize=6)
+                      [f"{w} · seqs {q}" for w, q in cells] if k == 0 else [], fontsize=fz(6))
         for c in (1.5, 3.5):
             ax.axvline(c, color="white", linewidth=2)
         ax.grid(False)
@@ -276,7 +291,7 @@ def s1_goodput(s, save):
             sp.set_visible(False)
         ax.set_title(lab, loc="left")
     fig.suptitle("RQ3 (supplementary) · SLO goodput with and without n-gram speculation (% of requests)",
-                 x=0.06, ha="left", y=1.1, fontsize=7.5)
+                 x=0.06, ha="left", y=1.1, fontsize=fz(7.5))
     save(fig, "fig_rq3_s1_goodput")
 
 
@@ -299,7 +314,7 @@ def s2_ttft(d, save):
                         plt.Line2D([], [], color=INK2, linestyle=(0, (3, 1.5)), label="no speculation")],
                loc="upper center", ncol=2, bbox_to_anchor=(0.5, -0.1))
     fig.suptitle("RQ3 (supplementary) · TTFT p95 under load with and without n-gram (mixed_real, max_num_seqs 64)",
-                 x=0.06, ha="left", y=1.06, fontsize=7.5)
+                 x=0.06, ha="left", y=1.06, fontsize=fz(7.5))
     save(fig, "fig_rq3_s2_ttft_load")
 
 
@@ -313,16 +328,17 @@ def main():
     a.out.mkdir(parents=True, exist_ok=True)
     if a.preview_dir:
         a.preview_dir.mkdir(parents=True, exist_ok=True)
+    fs = PAPER_FS if a.paper else {}
     style()
     save = Saver(a.out, a.preview_dir, a.paper)
     d = load(a.rq3)
     s = d.groupby(["workload_name", "max_num_seqs", "engine", "strategy_name"]).apply(summarise)
     s.reset_index().to_csv(a.out / "rq3_summary.csv", index=False)
-    f1_payoff(s, save).to_csv(a.out / "rq3_1_payoff_matrix.csv", index=False)
-    f2_tasks(d, save).to_csv(a.out / "rq3_2_by_task.csv", index=False)
-    f3_load(d, save).to_csv(a.out / "rq3_3_by_load.csv", index=False)
-    f4_trap(s, save).to_csv(a.out / "rq3_4_measurement_trap.csv", index=False)
-    s1_goodput(s, save)
+    style(fs.get("f1", 1.0)); f1_payoff(s, save).to_csv(a.out / "rq3_1_payoff_matrix.csv", index=False)
+    style(fs.get("f2", 1.0)); f2_tasks(d, save).to_csv(a.out / "rq3_2_by_task.csv", index=False)
+    style(fs.get("f3", 1.0)); f3_load(d, save).to_csv(a.out / "rq3_3_by_load.csv", index=False)
+    style(fs.get("f4", 1.0)); f4_trap(s, save).to_csv(a.out / "rq3_4_measurement_trap.csv", index=False)
+    style(); s1_goodput(s, save)
     s2_ttft(d, save)
     print(f"Done → {a.out}/")
 

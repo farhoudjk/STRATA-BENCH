@@ -54,11 +54,20 @@ COLS = ["engine", "model", "workload_name", "task_type", "max_concurrent", "max_
         "itl_max_ms"]
 
 
-def style():
+FS = 1.0  # font scale; the paper versions set it per figure (see PAPER_FS)
+
+
+def fz(x: float) -> float:
+    return x * FS
+
+
+def style(fs: float = 1.0):
+    global FS
+    FS = fs
     plt.rcParams.update({
         "font.family": "sans-serif", "font.sans-serif": ["Linux Biolinum O", "Libertinus Sans", "DejaVu Sans"],
-        "font.size": 7, "axes.titlesize": 7.5, "axes.labelsize": 7, "xtick.labelsize": 6.5,
-        "ytick.labelsize": 6.5, "legend.fontsize": 6.5, "axes.edgecolor": INK2, "axes.labelcolor": INK,
+        "font.size": 7 * fs, "axes.titlesize": 7.5 * fs, "axes.labelsize": 7 * fs,
+        "xtick.labelsize": 6.5 * fs, "ytick.labelsize": 6.5 * fs, "legend.fontsize": 6.5 * fs, "axes.edgecolor": INK2, "axes.labelcolor": INK,
         "text.color": INK, "xtick.color": INK2, "ytick.color": INK2, "axes.spines.top": False,
         "axes.spines.right": False, "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.5,
         "axes.axisbelow": True, "legend.frameon": False, "savefig.bbox": "tight",
@@ -66,6 +75,8 @@ def style():
     })
 
 
+# Paper font scale per figure: C2 and C4 are set at column width, the others at text width.
+PAPER_FS = {"c2": 1.12, "c3": 1.22, "c4": 1.22, "c56": 1.22}
 PAPER = False  # set by --paper: drop in-figure titles that duplicate LaTeX captions
 
 
@@ -78,7 +89,7 @@ def save(fig, out, name):
             if "conc." in t:            # context line: belongs in the caption
                 ax.set_title("", loc="left")
             elif t:
-                ax.set_title(re.sub(r"^[CS]\d+ · ", "", t), loc="left")
+                ax._left_title.set_text(re.sub(r"^[CS]\d+ · ", "", t))  # keeps the title's font size
     for ext in ("pdf", "png"):
         if PAPER and ext == "png":
             continue
@@ -138,7 +149,8 @@ def goodput(d, ttft_s, tpot_ms):
 # ── C2: latency vs throughput ────────────────────────────────────────────────
 def c2(d, out):
     s = d[(d.workload_name == "mixed_real") & (d.max_num_seqs == 256) & d.rate_label.isin(RATES)]
-    fig, axes = plt.subplots(3, 3, figsize=(7.0, 4.6), sharex=True, gridspec_kw=dict(hspace=0.18, wspace=0.28))
+    fig, axes = plt.subplots(3, 3, figsize=(3.45, 3.7), sharex=True, sharey="row",
+                             gridspec_kw=dict(hspace=0.16, wspace=0.12))
     rows = []
     for j, m in enumerate(MODEL):
         for e, st in ENG.items():
@@ -156,26 +168,27 @@ def c2(d, out):
             rows += pts
             p = pd.DataFrame(pts)
             for i, col in enumerate(["ttft_p95", "tpot_p95", "out_tok_s"]):
-                axes[i, j].plot(p.rps, p[col], color=st["color"], marker=st["marker"], markersize=4,
-                                markeredgecolor="white", markeredgewidth=0.5)
-        axes[0, j].set_title(MODEL[m], loc="left")
-        axes[0, j].set_yscale("log"); axes[0, j].set_ylim(0.1, 900); plain_log(axes[0, j].yaxis)
+                axes[i, j].plot(p.rps, p[col], color=st["color"], marker=st["marker"], markersize=3.2,
+                                linewidth=1.1, markeredgecolor="white", markeredgewidth=0.4)
+        axes[0, j].set_title(MODEL[m], loc="center", pad=3, fontsize=fz(6.4))
         axes[0, j].axhline(2, color=INK2, linestyle=(0, (3, 2)), linewidth=0.7)
         axes[0, j].axhline(4, color=INK2, linestyle=(0, (1, 1.5)), linewidth=0.7)
         axes[1, j].axhline(200, color=INK2, linestyle=(0, (3, 2)), linewidth=0.7)
-        axes[1, j].set_ylim(0, 300)
-        axes[2, j].set_ylim(0, None)
         axes[2, j].set_xscale("log", base=2); axes[2, j].set_xticks([2, 4, 8, 16]); plain_log(axes[2, j].xaxis)
-        axes[2, j].set_xlabel("Arrival rate (req/s, Poisson)")
-    axes[0, 0].set_ylabel("TTFT p95,\nfrom arrival (s)")
+    axes[0, 0].set_yscale("log"); axes[0, 0].set_ylim(0.1, 900); plain_log(axes[0, 0].yaxis)
+    axes[0, 0].set_yticks([0.1, 1, 10, 100])
+    axes[1, 0].set_ylim(0, 300)
+    axes[2, 0].set_ylim(0, None)
+    fig.supxlabel("Arrival rate (req/s, Poisson)", y=0.035, fontsize=fz(7))
+    axes[0, 0].set_ylabel("TTFT p95 (s)")
     axes[1, 0].set_ylabel("TPOT p95 (ms)")
-    axes[2, 0].set_ylabel("Output throughput\n(tok/s)")
-    axes[0, 2].text(1.02, 2, "2 s", transform=axes[0, 2].get_yaxis_transform(), fontsize=5.5, color=INK2, va="center")
-    axes[0, 2].text(1.02, 4.6, "4 s", transform=axes[0, 2].get_yaxis_transform(), fontsize=5.5, color=INK2, va="center")
-    axes[1, 2].text(1.02, 200, "200 ms", transform=axes[1, 2].get_yaxis_transform(), fontsize=5.5, color=INK2, va="center")
-    fig.legend(handles=eng_handles(True), loc="upper center", ncol=3, bbox_to_anchor=(0.5, 0.01))
-    fig.suptitle("C2 · Latency and throughput as load rises (mixed_real, conc. 256, max_num_seqs 256, L40S; dashed = SLO targets)",
-                 x=0.06, ha="left", y=0.98, fontsize=7.5)
+    axes[2, 0].set_ylabel("Output tok/s")
+    for ax_, yv, lab in ((axes[0, 2], 2, "2 s"), (axes[0, 2], 4.6, "4 s"), (axes[1, 2], 200, "200 ms")):
+        ax_.text(1.03, yv, lab, transform=ax_.get_yaxis_transform(), fontsize=fz(5.8), color=INK2, va="center")
+    fig.legend(handles=eng_handles(True), loc="upper center", ncol=3, bbox_to_anchor=(0.5, 0.0),
+               handlelength=1.6, columnspacing=1.0)
+    fig.suptitle("C2 · Latency and throughput as load rises (mixed_real, conc. 256, max_num_seqs 256, L40S)",
+                 x=0.06, ha="left", y=0.98, fontsize=fz(7.5))
     save(fig, out, "fig_c2_load_response")
     return pd.DataFrame(rows)
 
@@ -189,25 +202,30 @@ def ecdf(ax, x, **kw):
 
 def c3(d, out):
     s = d[(d.workload_name == "mixed_real") & (d.max_num_seqs == 256) & d.finished & (d.output_tokens > 20)]
-    fig, axes = plt.subplots(2, 3, figsize=(7.0, 3.4), sharey=True, gridspec_kw=dict(hspace=0.45, wspace=0.08))
+    fig, axs = plt.subplots(1, 7, figsize=(7.0, 1.65), sharey=True,
+                            gridspec_kw=dict(width_ratios=[1, 1, 1, 0.2, 1, 1, 1], wspace=0.16))
+    axs[3].set_visible(False)
+    top, bot = axs[:3], axs[4:]
     rows = []
     for j, m in enumerate(MODEL):
         for e, st in ENG.items():
             g = s[(s.model == m) & (s.engine == e)]
-            ecdf(axes[0, j], g.tpot_ms, color=st["color"], linewidth=1.3)
-            ecdf(axes[1, j], g.itl_max_ms / 1000, color=st["color"], linewidth=1.3)
+            ecdf(top[j], g.tpot_ms, color=st["color"], linewidth=1.3)
+            ecdf(bot[j], g.itl_max_ms / 1000, color=st["color"], linewidth=1.3)
             rows.append(dict(model=m, engine=e, tpot_p50=g.tpot_ms.median(), tpot_p95=g.tpot_ms.quantile(.95),
                              tbt_p95_p50=g.itl_p95_ms.median(), tbt_max_p95_s=g.itl_max_ms.quantile(.95) / 1000,
                              share_stall_over_1s=(g.itl_max_ms > 1000).mean()))
-        axes[0, j].set_title(MODEL[m], loc="left")
-        axes[0, j].set_xlim(20, 160); axes[0, j].set_xlabel("TPOT per request (ms)")
-        axes[1, j].set_xscale("log"); plain_log(axes[1, j].xaxis)
-        axes[1, j].set_xlabel("Longest token gap per request (s)")
-        axes[1, j].axvline(1, color=INK2, linestyle=(0, (3, 2)), linewidth=0.7)
-    axes[0, 0].set_ylabel("Share of requests"); axes[1, 0].set_ylabel("Share of requests")
-    fig.legend(handles=eng_handles(True), loc="upper center", ncol=3, bbox_to_anchor=(0.5, 0.0))
+        top[j].set_title(MODEL[m], loc="center", pad=3, fontsize=fz(5.7))
+        bot[j].set_title(MODEL[m], loc="center", pad=3, fontsize=fz(5.7))
+        top[j].set_xlim(20, 160); top[j].set_xticks([50, 100, 150]); top[j].set_xlabel("TPOT per request (ms)" if j == 1 else "")
+        bot[j].set_xscale("log"); plain_log(bot[j].xaxis); bot[j].set_xticks([0.1, 1, 10])
+        bot[j].set_xlabel("Longest gap between tokens (s)" if j == 1 else "")
+        bot[j].axvline(1, color=INK2, linestyle=(0, (3, 2)), linewidth=0.7)
+    axs[0].set_ylabel("Share of requests"); axs[0].set_yticks([0, 0.5, 1], ["0", ".5", "1"])
+    fig.legend(handles=eng_handles(True), loc="upper center", ncol=3, bbox_to_anchor=(0.5, -0.1),
+               handlelength=1.6)
     fig.suptitle("C3 · Streaming quality once a response starts (mixed_real, conc. 256, max_num_seqs 256, finished requests)",
-                 x=0.06, ha="left", y=0.99, fontsize=7.5)
+                 x=0.06, ha="left", y=0.99, fontsize=fz(7.5))
     save(fig, out, "fig_c3_streaming_quality")
     return pd.DataFrame(rows)
 
@@ -216,7 +234,7 @@ def c3(d, out):
 def c4(d, out):
     s = d[(d.max_num_seqs == 256) & d.latency_valid]
     cells = [(w, m) for w in WL for m in MODEL]
-    fig, ax = plt.subplots(figsize=(3.33, 2.6))
+    fig, ax = plt.subplots(figsize=(3.4, 2.9))
     rows = []
     for i, (w, m) in enumerate(cells):
         ax.axhspan(i - 0.45, i + 0.45, color="#f4f3f0" if i % 2 == 0 else "white", linewidth=0, zorder=0)
@@ -232,10 +250,14 @@ def c4(d, out):
             ax.scatter(p50, y, s=18, color=st["color"], marker=st["marker"], zorder=3, edgecolor="white", linewidth=0.4)
             ax.scatter(p99, y, s=18, facecolor="white", edgecolor=st["color"], marker=st["marker"], zorder=3, linewidth=0.8)
     ax.set_xscale("log"); plain_log(ax.xaxis)
-    ax.set_yticks(range(len(cells)), [f"{MODEL[m]}\n{w}" for w, m in cells], fontsize=6)
+    ax.set_yticks(range(len(cells)), [f"{MODEL[m]}\n{w}" for w, m in cells], fontsize=fz(6.2))
     ax.invert_yaxis(); ax.grid(axis="y", visible=False)
-    ax.set_xlabel("End-to-end latency from arrival (s)  ·  filled = p50, hollow = p99")
-    ax.legend(handles=eng_handles(), loc="lower right", fontsize=6)
+    ax.set_xlabel("End-to-end latency from arrival (s)")
+    ax.legend(handles=eng_handles() + [
+        plt.Line2D([], [], color=INK2, marker="o", linestyle="", markersize=4, label="p50"),
+        plt.Line2D([], [], color=INK2, marker="o", markerfacecolor="white", linestyle="", markersize=4, label="p99")],
+        loc="upper center", bbox_to_anchor=(0.4, -0.2), ncol=3, fontsize=fz(6.2), columnspacing=0.8,
+        handletextpad=0.2)
     ax.set_title("C4 · End-to-end latency (conc. 256, max_num_seqs 256)\ntimeouts counted at 300/600 s", loc="left")
     save(fig, out, "fig_c4_e2e")
     return pd.DataFrame(rows)
@@ -263,7 +285,7 @@ def c56(d, out):
             ax0.barh(yy, to, left=fin + zt, height=0.25, color=INK, linewidth=0)
             recs.append(dict(workload=w, model=m, engine=e, finished=fin, zero_token=zt, timeout=to))
         yt.append(i)
-    ax0.set_yticks(yt, labels, fontsize=6); ax0.invert_yaxis(); ax0.set_xlim(0, 100)
+    ax0.set_yticks(yt, labels, fontsize=fz(6)); ax0.invert_yaxis(); ax0.set_xlim(0, 100)
     ax0.grid(axis="y", visible=False); ax0.set_xlabel("Share of requests (%)")
     ax0.set_title("C5 · How requests end", loc="left")
     # goodput heatmaps
@@ -274,22 +296,23 @@ def c56(d, out):
                        for e in ENG] for w, m in cells])
         ax.imshow(M, cmap=cmap, vmin=0, vmax=100, aspect="auto")
         for (r, c), v in np.ndenumerate(M):
-            ax.text(c, r, f"{v:.0f}", ha="center", va="center", fontsize=6.5,
+            ax.text(c, r, f"{v:.0f}", ha="center", va="center", fontsize=fz(6.5),
                     color="white" if v >= 55 else INK, fontweight="bold" if v == M[r].max() else "normal")
-        ax.set_xticks(range(len(ENG)), [v["label"] for v in ENG.values()], fontsize=6, rotation=20, ha="right")
+        ax.set_xticks(range(len(ENG)), [v["label"] for v in ENG.values()], fontsize=fz(6), rotation=20, ha="right")
         ax.set_yticks([]); ax.grid(False)
         for sp in ax.spines.values():
             sp.set_visible(False)
-        ax.set_title(f"C6 · Goodput, {tier}\nTTFT ≤ {a:g} s, TPOT ≤ {b:g} ms", loc="left")
+        ax.set_title(f"C6 · {tier.capitalize()} goodput (%)\n≤ {a:g} s TTFT, ≤ {b:g} ms TPOT", loc="left",
+                     fontsize=fz(6.6))
         for (w, m), row in zip(cells, M):
             for e, v in zip(ENG, row):
                 recs.append(dict(workload=w, model=m, engine=e, tier=tier, goodput=v))
     handles = [mpatches.Patch(color=INK2, label="finished (engine colour)"),
                mpatches.Patch(facecolor="white", edgecolor=INK2, hatch="//////", label="zero-token reply (model)"),
                mpatches.Patch(color=INK, label="timeout (engine)")]
-    fig.legend(handles=handles + eng_handles(), loc="upper center", ncol=6, bbox_to_anchor=(0.5, -0.05), fontsize=6)
+    fig.legend(handles=handles + eng_handles(), loc="upper center", ncol=6, bbox_to_anchor=(0.5, -0.05), fontsize=fz(6))
     fig.suptitle("Reliability and SLO goodput (% of all requests; bold = best engine; conc. 256, max_num_seqs 256, L40S)",
-                 x=0.06, ha="left", y=1.04, fontsize=7.5)
+                 x=0.06, ha="left", y=1.04, fontsize=fz(7.5))
     save(fig, out, "fig_c5_c6_outcomes_goodput")
     return pd.DataFrame(recs)
 
@@ -328,7 +351,7 @@ def c7(d, out):
                 ax.set_xlabel("max_num_seqs")
     fig.legend(handles=eng_handles(True), loc="upper center", ncol=3, bbox_to_anchor=(0.5, 0.02))
     fig.suptitle("C7 · What raising max_num_seqs from 64 to 256 buys (mixed_real, conc. 256, L40S)",
-                 x=0.06, ha="left", y=0.98, fontsize=7.5)
+                 x=0.06, ha="left", y=0.98, fontsize=fz(7.5))
     save(fig, out, "fig_c7_max_num_seqs")
     return pd.DataFrame(rows)
 
@@ -346,18 +369,18 @@ def s1(d, out):
                        for e in ENG] for w, m in cells])
         ax.imshow(M, cmap=cmap, vmin=0, vmax=100, aspect="auto")
         for (r, c), v in np.ndenumerate(M):
-            ax.text(c, r, f"{v:.0f}", ha="center", va="center", fontsize=6.5,
+            ax.text(c, r, f"{v:.0f}", ha="center", va="center", fontsize=fz(6.5),
                     color="white" if v >= 55 else INK, fontweight="bold" if v == M[r].max() else "normal")
             recs.append(dict(tier=name, workload=cells[r][0], model=cells[r][1], engine=list(ENG)[c], goodput=v))
-        ax.set_xticks(range(len(ENG)), [v["label"] for v in ENG.values()], fontsize=6, rotation=20, ha="right")
+        ax.set_xticks(range(len(ENG)), [v["label"] for v in ENG.values()], fontsize=fz(6), rotation=20, ha="right")
         ax.set_yticks(range(len(cells)) if k == 0 else [], [f"{MODEL[m]} · {w}" for w, m in cells] if k == 0 else [],
-                      fontsize=6)
+                      fontsize=fz(6))
         ax.grid(False)
         for sp in ax.spines.values():
             sp.set_visible(False)
         ax.set_title(name, loc="left")
     fig.suptitle("S1 · A tight TPOT target changes the winner (% of requests meeting the SLO; conc. 256, max_num_seqs 256)",
-                 x=0.06, ha="left", y=1.06, fontsize=7.5)
+                 x=0.06, ha="left", y=1.06, fontsize=fz(7.5))
     save(fig, out, "fig_s1_tight_tpot_goodput")
     return pd.DataFrame(recs)
 
@@ -372,14 +395,13 @@ def main():
     global PAPER
     PAPER = a.paper
     a.out.mkdir(parents=True, exist_ok=True)
-    style()
+    fs = PAPER_FS if a.paper else {}
     d = load(a.rq1_dir, a.cache or a.rq1_dir / "rq1_flowc.parquet")
-    c2(d, a.out).to_csv(a.out / "c2_load_response.csv", index=False)
-    c3(d, a.out).to_csv(a.out / "c3_streaming_quality.csv", index=False)
-    c4(d, a.out).to_csv(a.out / "c4_e2e.csv", index=False)
-    c56(d, a.out).to_csv(a.out / "c5_c6_outcomes_goodput.csv", index=False)
-    c7(d, a.out).to_csv(a.out / "c7_max_num_seqs.csv", index=False)
-    s1(d, a.out).to_csv(a.out / "s1_tight_tpot_goodput.csv", index=False)
+    for name, fn, csv in ((("c2", c2, "c2_load_response"), ("c3", c3, "c3_streaming_quality"), ("c4", c4, "c4_e2e"),
+                           ("c56", c56, "c5_c6_outcomes_goodput"), ("c7", c7, "c7_max_num_seqs"),
+                           ("s1", s1, "s1_tight_tpot_goodput"))):
+        style(fs.get(name, 1.0))
+        fn(d, a.out).to_csv(a.out / f"{csv}.csv", index=False)
     print(f"Done → {a.out}/")
 
 
