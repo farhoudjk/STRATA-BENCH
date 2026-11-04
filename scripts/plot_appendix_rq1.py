@@ -111,17 +111,20 @@ def a1(d, out):
     axes[0].set_ylabel("TTFT from arrival (s)")
 
     ax = axes[2]
-    for e in ("vllm", "sglang"):
-        g = d[(d.model == "qwen15_14b") & (d.engine == e) & (d.max_num_seqs == seqs) & (d.rate_label == rate)
-              & d.t_done.notna()].sort_values("t_done")
-        ax.plot(g.t_done, g.num_running_seqs.rolling(9, center=True, min_periods=3).median(),
-                color=ENG[e]["color"], linewidth=1.2)
-        stats.append(dict(panel="(c)", model="qwen15_14b", engine=e, running_p50=g.num_running_seqs.median(),
-                          running_max=g.num_running_seqs.max()))
-    ax.text(0.97, 0.95, "TensorRT-LLM:\nnot exposed", transform=ax.transAxes, ha="right", va="top", fontsize=6,
-            color=INK2)
-    ax.set_ylim(0, None); ax.set_xlabel("Time in run (s)"); ax.set_ylabel("Running requests")
-    ax.set_title("(c) Qwen1.5-14B: running", loc="left")
+    # Requests streaming at time t, from client timestamps only (works for every engine):
+    # first token received and not yet finished. Started-but-unfinished requests end at the 600 s timeout.
+    for e, st in ENG.items():
+        g = d[(d.model == "qwen15_14b") & (d.engine == e) & (d.max_num_seqs == seqs) & (d.rate_label == rate)]
+        started = g.ttft_s > 0
+        t_first = g.t_send + g.ttft_s
+        t_end = np.where(g.status == "ok", g.t_send + g.e2e_s, np.where(started, g.t_send + 600.0, np.nan))
+        grid = np.arange(0, np.nanmax(t_end), 2.0)
+        cnt = np.array([int(((t_first <= t) & (t_end > t) & started).sum()) for t in grid])
+        ax.plot(grid, cnt, color=st["color"], linewidth=1.1)
+        stats.append(dict(panel="(c)", model="qwen15_14b", engine=e, streaming_p50=float(np.median(cnt[cnt > 0])),
+                          streaming_max=int(cnt.max()), started=int(started.sum()), requests=len(g)))
+    ax.set_ylim(0, None); ax.set_xlabel("Time in run (s)"); ax.set_ylabel("Requests streaming")
+    ax.set_title("(c) Qwen1.5: in service", loc="left")
 
     ax = axes[3]
     for e, st in ENG.items():
@@ -134,7 +137,7 @@ def a1(d, out):
                 markeredgecolor="white", markeredgewidth=0.5)
     ax.set_xscale("log", base=2); ax.set_xticks([2, 4, 8, 16]); plain_log(ax.xaxis)
     ax.set_ylim(0, 500); ax.set_xlabel("Arrival rate (req/s)"); ax.set_ylabel("Request position")
-    ax.set_title("(d) Llama: backlog starts at", loc="left")
+    ax.set_title("(d) Llama: backlog from", loc="left")
     handles = [plt.Line2D([], [], color=v["color"], marker=v["marker"], markersize=4, label=v["label"])
                for v in ENG.values()]
     fig.legend(handles=handles, loc="upper center", ncol=3, bbox_to_anchor=(0.5, -0.06))
