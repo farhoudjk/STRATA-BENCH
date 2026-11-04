@@ -1,0 +1,7 @@
+engine,metric,change
+vllm,itl_p50_ms,8.546031627008322
+sglang,itl_p50_ms,56.57517754717904
+tensorrt-llm,itl_p50_ms,46.66262070470898
+vllm,tpot_p50,-9.334234073632135
+sglang,tpot_p50,-11.937112746415583
+tensorrt-llm,tpot_p50,-3.3110809947900646
