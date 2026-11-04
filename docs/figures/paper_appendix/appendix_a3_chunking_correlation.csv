@@ -1,0 +1,7 @@
+engine,strategy,pearson_r
+sglang,baseline_full_fp16_tp1,0.42394031676312227
+sglang,chunked_512_fp16_tp1,0.4876128246760356
+tensorrt-llm,baseline_full_fp16_tp1,0.5139871379015664
+tensorrt-llm,chunked_512_fp16_tp1,0.2511675446880773
+vllm,baseline_full_fp16_tp1,0.49461606353559956
+vllm,chunked_512_fp16_tp1,0.3133538538096401
