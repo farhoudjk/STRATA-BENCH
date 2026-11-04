@@ -57,10 +57,17 @@ def style():
 
 
 class Saver:
-    def __init__(self, out: Path, preview: Path | None):
-        self.out, self.preview = out, preview
+    def __init__(self, out: Path, preview: Path | None, paper: bool = False):
+        self.out, self.preview, self.paper = out, preview, paper
 
     def __call__(self, fig, name):
+        if self.paper:  # captions live in LaTeX: drop figure and panel-level context titles
+            if fig._suptitle is not None:
+                fig._suptitle.set_visible(False)
+            for ax in fig.axes:
+                t = ax.get_title(loc="left")
+                if "\n(" in t:
+                    ax.set_title(t.split("\n")[0], loc="left")
         fig.savefig(self.out / f"{name}.pdf")
         if self.preview:
             fig.savefig(self.preview / f"{name}.png", dpi=150)
@@ -301,12 +308,13 @@ def main():
     ap.add_argument("--rq3", type=Path, required=True)
     ap.add_argument("--out", type=Path, default=Path("docs/figures/rq3"))
     ap.add_argument("--preview-dir", type=Path)
+    ap.add_argument("--paper", action="store_true", help="drop in-figure titles (captions go in LaTeX)")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     if a.preview_dir:
         a.preview_dir.mkdir(parents=True, exist_ok=True)
     style()
-    save = Saver(a.out, a.preview_dir)
+    save = Saver(a.out, a.preview_dir, a.paper)
     d = load(a.rq3)
     s = d.groupby(["workload_name", "max_num_seqs", "engine", "strategy_name"]).apply(summarise)
     s.reset_index().to_csv(a.out / "rq3_summary.csv", index=False)
