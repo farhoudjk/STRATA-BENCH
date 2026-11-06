@@ -76,7 +76,7 @@ def style(fs: float = 1.0):
 
 
 # Paper font scale per figure: C2 and C4 are set at column width, the others at text width.
-PAPER_FS = {"c2": 1.12, "c3": 1.22, "c4": 1.22, "c56": 1.22, "c8": 1.12}
+PAPER_FS = {"c2": 1.12, "c3": 1.22, "c4": 1.22, "c56": 1.22, "c6": 1.12, "c8": 1.12}
 PAPER = False  # set by --paper: drop in-figure titles that duplicate LaTeX captions
 
 
@@ -355,6 +355,40 @@ def c8(d, out):
     return pd.DataFrame(rows)
 
 
+# ── C6: SLO goodput only (paper version, column width) ──────────────────────
+def c6(d, out):
+    s = d[d.max_num_seqs == 256]
+    cells = [(w, m) for w in WL for m in MODEL]
+    short = {"llama31_8b": "Llama", "mistral_nemo_12b": "Mistral", "qwen15_14b": "Qwen1.5"}
+    cmap = mcolors.LinearSegmentedColormap.from_list("blue", ["#f3f7fd", "#9cc0ee", "#2a78d6", "#123f78"])
+    fig, axes = plt.subplots(1, 2, figsize=(3.45, 2.15), sharey=True, gridspec_kw=dict(wspace=0.06))
+    recs = []
+    for ax, (tier, (a, b)) in zip(axes, TIERS.items()):
+        M = np.array([[goodput(s[(s.workload_name == w) & (s.model == m) & (s.engine == e)], a, b)
+                       for e in ENG] for w, m in cells])
+        ax.imshow(M, cmap=cmap, vmin=0, vmax=100, aspect="auto")
+        for (r, c), v in np.ndenumerate(M):
+            ax.text(c, r, f"{v:.0f}", ha="center", va="center", fontsize=fz(6.4),
+                    color="white" if v >= 55 else INK,
+                    fontweight="bold" if round(v) == round(M[r].max()) else "normal")
+        ax.set_xticks(range(len(ENG)), ["vLLM", "SGLang", "TRT-LLM"], fontsize=fz(6))
+        ax.xaxis.tick_top(); ax.tick_params(axis="x", length=0, pad=2)
+        ax.set_yticks(range(len(cells)), [f"{short[m]} · {'mixed' if w == 'mixed_real' else 'multi-turn'}"
+                                          for w, m in cells], fontsize=fz(6))
+        ax.tick_params(axis="y", length=0)
+        ax.axhline(len(MODEL) - 0.5, color="white", linewidth=2.5)
+        ax.grid(False)
+        for sp in ax.spines.values():
+            sp.set_visible(False)
+        ax.set_xlabel(f"{tier.capitalize()} SLO\nTTFT ≤ {a:g} s, TPOT ≤ {b:g} ms", fontsize=fz(6.2))
+        recs += [dict(workload=w, model=m, engine=e, tier=tier, goodput=v)
+                 for (w, m), row in zip(cells, M) for e, v in zip(ENG, row)]
+    fig.suptitle("C6 · SLO goodput (% of all requests; bold = best engine; conc. 256, max_num_seqs 256, L40S)",
+                 x=0.06, ha="left", y=1.04, fontsize=fz(7.5))
+    save(fig, out, "fig_c6_goodput")
+    return pd.DataFrame(recs)
+
+
 # ── C7: max_num_seqs ─────────────────────────────────────────────────────────
 def c7(d, out):
     s = d[d.workload_name == "mixed_real"]
@@ -437,7 +471,7 @@ def main():
     d = load(a.rq1_dir, a.cache or a.rq1_dir / "rq1_flowc.parquet")
     for name, fn, csv in ((("c2", c2, "c2_load_response"), ("c3", c3, "c3_streaming_quality"), ("c4", c4, "c4_e2e"),
                            ("c56", c56, "c5_c6_outcomes_goodput"), ("c7", c7, "c7_max_num_seqs"),
-                           ("c8", c8, "c8_slowdown_by_task"), ("s1", s1, "s1_tight_tpot_goodput"))):
+                           ("c6", c6, "c6_goodput"), ("c8", c8, "c8_slowdown_by_task"), ("s1", s1, "s1_tight_tpot_goodput"))):
         style(fs.get(name, 1.0))
         fn(d, a.out).to_csv(a.out / f"{csv}.csv", index=False)
     print(f"Done → {a.out}/")
