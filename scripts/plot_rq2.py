@@ -125,7 +125,8 @@ def summary(d: pd.DataFrame) -> pd.DataFrame:
 
 # ── F1: payoff matrix ────────────────────────────────────────────────────────
 METRICS = [("ttft_p95", "TTFT p95"), ("tpot_p95", "TPOT p95"), ("gap_p95_ms", "Longest gap p95"),
-           ("e2e_p50", "E2E p50")]
+           ("e2e_p50", "E2E p50"), ("goodput_strict", "Goodput (pp)")]
+PP = {"goodput_strict"}  # reported as a difference in percentage points; higher is better
 
 
 def f1_payoff(s, save):
@@ -139,15 +140,18 @@ def f1_payoff(s, save):
             for e, st in ENG.items():
                 b = s[(s.workload_name == w) & (s.strategy_name == BASE) & (s.engine == e)].iloc[0]
                 x = s[(s.workload_name == w) & (s.strategy_name == strat) & (s.engine == e)].iloc[0]
-                pct = [100 * (x[m] - b[m]) / b[m] for m, _ in METRICS]
+                pct = [(x[m] - b[m]) if m in PP else 100 * (x[m] - b[m]) / b[m] for m, _ in METRICS]
                 rows.append(pct); labels.append((slab, st["label"]))
                 recs += [dict(workload=w, feature=slab, engine=e, metric=m, base=b[m], value=x[m], pct=p)
                          for (m, _), p in zip(METRICS, pct)]
         M = np.array(rows)
-        ax.imshow(M, cmap=cmap, norm=norm, aspect="auto")
+        pp_col = [m in PP for m, _ in METRICS]
+        C = np.where(pp_col, -M * 6, M)  # colour: higher goodput is better; 1 pp drawn like 6 %
+        ax.imshow(C, cmap=cmap, norm=norm, aspect="auto")
         for (r, c), v in np.ndenumerate(M):
-            ax.text(c, r, f"{v:+.0f}%", ha="center", va="center", fontsize=fz(6),
-                    color="white" if abs(v) >= 55 else INK)
+            txt = f"{round(v, 1) + 0.0:+.1f}" if pp_col[c] else f"{round(v) + 0.0:+.0f}%"
+            ax.text(c, r, txt, ha="center", va="center", fontsize=fz(6),
+                    color="white" if abs(C[r, c]) >= 55 else INK)
         ax.set_xticks(range(len(METRICS)), [m[1].replace(" ", "\n", 1) for m in METRICS], fontsize=fz(6))
         ax.xaxis.tick_top()
         if ax is axes[0]:
@@ -162,7 +166,8 @@ def f1_payoff(s, save):
         ax.set_title(wlab, loc="left", pad=28 if FS > 1 else 20, fontweight="bold")
     sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
     cb = fig.colorbar(sm, ax=axes, orientation="horizontal", fraction=0.05, pad=0.04, aspect=50)
-    cb.set_label("Change vs. both features off (%)   ←  better   |   worse  →", fontsize=fz(6.5))
+    cb.set_label("Change vs. both features off (%; goodput in points)   ←  better   |   worse  →",
+                 fontsize=fz(6.5))
     cb.outline.set_visible(False)
     fig.suptitle("RQ2 · What each prefill feature buys, per engine (Mistral-NeMo-12B, conc. 256, L40S)",
                  x=0.06, ha="left", y=1.12, fontsize=fz(7.5))
