@@ -13,7 +13,8 @@ comparison uses quantities computed identically on both platforms from per-confi
   completion         share of requests that finished
 Both platforms: concurrency 256, max_num_seqs 256, mixed_real and chat_multiturn, five arrival processes.
 
-Figure (main):    fig_rq4_platforms     peak KV, median TTFT, median TPOT per model x engine, L40S -> GB10
+Figure (main):    fig_rq4_platforms     % finished, median TTFT, median TPOT per model x engine, L40S -> GB10
+                  (peak KV is not in the main figure: TensorRT-LLM's was not recorded on the L40S)
 Figure (appendix): fig_appendix_a6_gb10 (a) vLLM preemptions vs peak KV on both platforms;
                                         (b, c) GB10 request outcomes, reasoning vs other tasks, with
                                         the L40S finished share for reference.
@@ -108,7 +109,7 @@ def summarise(pc: pd.DataFrame, platform: str) -> pd.DataFrame:
 
 def fig_main(summ: pd.DataFrame, out: Path):
     rows = [(m, e) for m in MODEL for e in ENG]
-    panels = [("kv_peak", "Peak KV-cache use (%)", False, (0, 105)),
+    panels = [("completion", "Requests finished (%)", False, (30, 102)),
               ("ttft_med", "Median TTFT (s)", True, (0.05, 400)),
               ("tpot_med", "Median TPOT (ms)", True, (30, 700))]
     fig, axes = plt.subplots(1, 3, figsize=(7.0, 2.8), sharey=True, gridspec_kw=dict(wspace=0.08))
