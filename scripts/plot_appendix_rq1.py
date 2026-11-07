@@ -8,8 +8,8 @@ A1  Admission behaviour over a run: TTFT over arrival time (Llama, Qwen), runnin
 A2  Preemption and its cost (vLLM only: the one engine with a live preemption counter), and the
     output-length difference between models.
 TTFT is measured from arrival (open loop); requests with no first token within 300 s are drawn at
-the ceiling. Colour = engine; in A2, where only vLLM is shown, models are distinguished by grey
-shade and marker.
+the ceiling. Colour = engine; in A2, where only vLLM is shown, colour = model (a palette distinct from the
+engine colours).
 """
 from __future__ import annotations
 
@@ -147,57 +147,78 @@ def a1(d, out):
 
 
 # ── A2: preemption, stalls, output length ────────────────────────────────────
+# Model colours for A2, where only vLLM is shown; chosen to be distinct from the engine palette.
+MCOL = {"llama31_8b": "#7b4fd6", "mistral_nemo_12b": "#d6488a", "qwen15_14b": "#b07d00"}
+A2_RC = {"font.size": 8, "axes.titlesize": 8.4, "axes.labelsize": 8, "xtick.labelsize": 7.4,
+         "ytick.labelsize": 7.4, "legend.fontsize": 7.4}
+
+
 def a2(d, out):
-    fig, axes = plt.subplots(1, 3, figsize=(7.0, 1.95), gridspec_kw=dict(wspace=0.35))
+    with plt.rc_context(A2_RC):
+        return _a2(d, out)
+
+
+def _a2(d, out):
+    fig, axes = plt.subplots(1, 3, figsize=(7.0, 2.15), gridspec_kw=dict(wspace=0.42))
     stats = []
     v = d[d.engine == "vllm"]
+
+    # (a) peak KV vs preemptions, one point per run
     ax = axes[0]
     for m, st in MODEL.items():
         rows = []
         for (q, r), g in v[v.model == m].groupby(["max_num_seqs", "rate_label"]):
             rows.append((g.kv_cache_usage_pct.max(), g.num_preemptions.max()))
         a = np.array(rows)
-        ax.scatter(a[:, 0], a[:, 1], s=14, marker=st["marker"], facecolor=st["grey"], edgecolor=INK, linewidth=0.4,
-                   zorder=3)
+        off = {"llama31_8b": -1.6, "mistral_nemo_12b": 0.0, "qwen15_14b": 1.6}[m]
+        xs = np.where(a[:, 0] >= 99, a[:, 0] + off, a[:, 0])  # spread runs at a full cache
+        ax.scatter(xs, a[:, 1], s=20, marker=st["marker"], color=MCOL[m], edgecolor="white", linewidth=0.4,
+                   alpha=0.9, zorder=3)
         stats += [dict(panel="(a)", model=m, kv_peak=k_, preemptions=p_) for k_, p_ in rows]
-    ax.set_yscale("symlog", linthresh=1); ax.set_xlim(0, 104)
+    ax.set_yscale("symlog", linthresh=1); ax.set_xlim(0, 106)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v_, _: f"{v_:g}"))
     ax.axvline(100, color=INK2, linestyle=(0, (3, 2)), linewidth=0.6)
+    ax.text(98, 0.25, "cache\nfull", ha="right", va="bottom", fontsize=6.6, color=INK2)
     ax.set_xlabel("Peak KV-cache use (%)"); ax.set_ylabel("Preemptions per run")
-    ax.set_title("(a) Preemption needs a full cache", loc="left")
+    ax.set_title("(a) Only a full cache preempts", loc="left")
 
+    # (b) longest gap, requests that overlapped a preemption (solid) or not (dashed)
     ax = axes[1]
     s = v[(v.max_num_seqs == 256) & (v.status == "ok") & v.itl_max_ms.notna()]
     for m in ("llama31_8b", "qwen15_14b"):
-        for hit, lw, alpha in ((False, 1.0, 0.55), (True, 1.4, 1.0)):
+        for hit, ls, lw in ((False, (0, (3, 1.6)), 1.1), (True, "-", 1.5)):
             x = np.sort(s[(s.model == m) & ((s.num_preemptions_delta > 0) == hit)].itl_max_ms.values / 1000)
             if len(x) < 5:
                 continue
-            ax.step(x, np.arange(1, len(x) + 1) / len(x), where="post", color=MODEL[m]["grey"] if m != "qwen15_14b"
-                    else "#8c8a85", linestyle=MODEL[m]["ls"], linewidth=lw, alpha=alpha)
+            ax.step(x, np.arange(1, len(x) + 1) / len(x), where="post", color=MCOL[m], linestyle=ls, linewidth=lw)
             stats.append(dict(panel="(b)", model=m, overlaps_preemption=hit, n=len(x), gap_p50_s=np.median(x),
                               gap_p90_s=np.quantile(x, .9)))
-    ax.set_xscale("log"); plain_log(ax.xaxis)
-    ax.set_xlabel("Longest token gap per request (s)"); ax.set_ylabel("Share of requests")
+    ax.set_xscale("log"); plain_log(ax.xaxis); ax.set_xticks([0.1, 1, 10, 100])
+    ax.axvline(1, color=INK2, linestyle=(0, (1, 1.5)), linewidth=0.6)
+    ax.set_xlabel("Longest token gap (s)"); ax.set_ylabel("Share of requests")
     ax.set_title("(b) Preemption causes stalls", loc="left")
-    ax.legend(handles=[plt.Line2D([], [], color=INK, linewidth=1.4, label="overlaps\npreemption"),
-                       plt.Line2D([], [], color=INK, linewidth=1.0, alpha=0.55, label="no\npreemption")],
-              loc="lower right", bbox_to_anchor=(1.0, 0.02), fontsize=5.6, handlelength=1.4)
 
+    # (c) reasoning output length per model
     ax = axes[2]
     r = d[(d.status == "ok") & (d.task_type == "reasoning") & (d.output_tokens > 0)]
     for m, st in MODEL.items():
         x = np.sort(r[r.model == m].output_tokens.values)
-        ax.step(x, np.arange(1, len(x) + 1) / len(x), where="post", color=st["grey"] if m != "qwen15_14b" else "#8c8a85",
-                linestyle=st["ls"], linewidth=1.3)
+        ax.step(x, np.arange(1, len(x) + 1) / len(x), where="post", color=MCOL[m], linewidth=1.4)
         stats.append(dict(panel="(c)", model=m, mean_tokens=x.mean(), median_tokens=np.median(x)))
     ax.set_xscale("log"); plain_log(ax.xaxis)
-    ax.set_xlabel("Output tokens (reasoning requests)"); ax.set_ylabel("Share of requests")
-    ax.set_title("(c) Llama answers 6x longer", loc="left")
-    handles = [plt.Line2D([], [], color=st["grey"] if m != "qwen15_14b" else "#8c8a85", marker=st["marker"],
-                          linestyle=st["ls"], markersize=3.5, markerfacecolor=st["grey"], markeredgecolor=INK,
-                          markeredgewidth=0.4, label=st["label"]) for m, st in MODEL.items()]
-    fig.legend(handles=handles, loc="upper center", ncol=3, bbox_to_anchor=(0.5, -0.06))
+    ax.set_xlabel("Reasoning output tokens"); ax.set_ylabel("Share of requests")
+    ax.set_title("(c) Llama answers 6× longer", loc="left")
+
+    handles = [plt.Line2D([], [], color=MCOL[m], marker=st["marker"], linestyle="", markersize=6,
+                          markeredgecolor="white", markeredgewidth=0.4, label=st["label"]) for m, st in MODEL.items()]
+    leg = fig.legend(handles=handles, loc="upper left", ncol=3, bbox_to_anchor=(0.04, -0.05),
+                     title="Model (all panels; vLLM only)", title_fontsize=7.4, handlelength=2.0, columnspacing=1.4)
+    fig.add_artist(leg)
+    fig.legend(handles=[plt.Line2D([], [], color=INK2, linewidth=1.5, label="preempted during the request"),
+                        plt.Line2D([], [], color=INK2, linewidth=1.1, linestyle=(0, (3, 1.6)),
+                                   label="not preempted")],
+               loc="upper right", ncol=1, bbox_to_anchor=(0.98, -0.05), title="Line style in (b)",
+               title_fontsize=7.4, handlelength=2.0)
     fig.savefig(out / "fig_appendix_a2_preemption.pdf")
     plt.close(fig)
     return pd.DataFrame(stats)
