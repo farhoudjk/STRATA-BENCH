@@ -353,7 +353,17 @@ def c8(d, out):
         ax.set_xlim(-0.4, 3.4)
         ax.set_title(mlab, loc="center", fontsize=fz(6.2), pad=3)
         ax.grid(axis="x", visible=False)
-    axes[0].set_ylabel("Median slowdown\n(E2E / streaming time)")
+    axes[0].set_ylabel("Times longer than\ngeneration alone (×)")
+    axes[0].yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:g}×"))
+    # right-hand scale: the same quantity as the share of the request's time spent waiting (1 - 1/slowdown)
+    tw = axes[-1].twinx()
+    tw.set_yscale("log"); tw.set_ylim(axes[-1].get_ylim())
+    tw.set_yticks([1, 2, 10, 100], ["0%", "50%", "90%", "99%"], fontsize=fz(6.2))
+    tw.yaxis.set_minor_formatter(mticker.NullFormatter()); tw.tick_params(axis="y", which="minor", length=0)
+    tw.set_ylabel("Time spent waiting", fontsize=fz(6.6), color=INK)
+    tw.grid(False)
+    for sp in ("top",):
+        tw.spines[sp].set_visible(False)
     fig.legend(handles=eng_handles(True), loc="upper center", ncol=3, bbox_to_anchor=(0.5, -0.06),
                handlelength=1.6)
     fig.suptitle("C8 · Who pays the wait: slowdown by task (mixed_real, conc. 256, max_num_seqs 256, Poisson rates)",
