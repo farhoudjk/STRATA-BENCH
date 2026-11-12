@@ -194,9 +194,15 @@ def c2(d, out):
 
 
 # ── C3: streaming quality ────────────────────────────────────────────────────
-def ecdf(ax, x, **kw):
+def ecdf(ax, x, marks=None, mark_offset=0.0, **kw):
+    """Empirical CDF. With `marks` (a marker style), draws markers at fixed quantiles so that lines
+    can be told apart without colour; `mark_offset` staggers the quantiles between series."""
     x = np.sort(np.asarray(x)[np.isfinite(x)])
     if len(x):
+        if marks:
+            q = np.clip(np.array([0.15, 0.35, 0.55, 0.75, 0.92]) + mark_offset, 0.01, 0.99)
+            kw.update(marker=marks, markevery=sorted(set((q * (len(x) - 1)).astype(int))), markersize=3.2,
+                      markeredgecolor="white", markeredgewidth=0.4)
         ax.step(x, np.arange(1, len(x) + 1) / len(x), where="post", **kw)
 
 
@@ -210,8 +216,9 @@ def c3(d, out):
     for j, m in enumerate(MODEL):
         for e, st in ENG.items():
             g = s[(s.model == m) & (s.engine == e)]
-            ecdf(top[j], g.tpot_ms, color=st["color"], linewidth=1.3)
-            ecdf(bot[j], g.itl_max_ms / 1000, color=st["color"], linewidth=1.3)
+            off = {"vllm": -0.04, "sglang": 0.0, "tensorrt-llm": 0.04}[e]
+            ecdf(top[j], g.tpot_ms, marks=st["marker"], mark_offset=off, color=st["color"], linewidth=1.3)
+            ecdf(bot[j], g.itl_max_ms / 1000, marks=st["marker"], mark_offset=off, color=st["color"], linewidth=1.3)
             rows.append(dict(model=m, engine=e, tpot_p50=g.tpot_ms.median(), tpot_p95=g.tpot_ms.quantile(.95),
                              tbt_p95_p50=g.itl_p95_ms.median(), tbt_max_p95_s=g.itl_max_ms.quantile(.95) / 1000,
                              share_stall_over_1s=(g.itl_max_ms > 1000).mean()))

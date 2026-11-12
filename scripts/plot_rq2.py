@@ -243,8 +243,11 @@ def f4_chunk_stalls(d, save):
             for strat, ls in (("baseline_full_fp16_tp1", (0, (3, 1.5))), ("chunked_512_fp16_tp1", "-")):
                 g = d[(d.workload_name == w) & (d.engine == e) & (d.strategy_name == strat) & d.finished]
                 x = np.sort(g.itl_max_ms.dropna().values / 1000)
+                off = {"vllm": -0.04, "sglang": 0.0, "tensorrt-llm": 0.04}[e]
+                q = np.clip(np.array([0.2, 0.5, 0.8]) + off, 0.01, 0.99)
                 ax.step(x, np.arange(1, len(x) + 1) / len(x), where="post", color=st["color"], linestyle=ls,
-                        linewidth=1.2)
+                        linewidth=1.2, marker=st["marker"], markevery=sorted(set((q * (len(x) - 1)).astype(int))),
+                        markersize=3.0, markeredgecolor="white", markeredgewidth=0.4)
                 recs.append(dict(workload=w, engine=e, strategy=strat, gap_p50_s=np.median(x),
                                  gap_p95_s=np.quantile(x, .95), share_over_1s=(x > 1).mean()))
         ax.set_xscale("log"); plain_log(ax.xaxis); ax.set_xticks([0.1, 1, 10])
