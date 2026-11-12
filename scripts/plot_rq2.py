@@ -29,6 +29,10 @@ import matplotlib.colors as mcolors  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import matplotlib.ticker as mticker  # noqa: E402
 
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parent))
+from plot_flowc import overlay_goodput_column, two_colorbars  # noqa: E402
+
 ENG = {
     "vllm": dict(label="vLLM", color="#2a78d6", marker="o"),
     "sglang": dict(label="SGLang", color="#eb6834", marker="s"),
@@ -145,13 +149,14 @@ def f1_payoff(s, save):
                 recs += [dict(workload=w, feature=slab, engine=e, metric=m, base=b[m], value=x[m], pct=p)
                          for (m, _), p in zip(METRICS, pct)]
         M = np.array(rows)
-        pp_col = [m in PP for m, _ in METRICS]
-        C = np.where(pp_col, -M * 6, M)  # colour: higher goodput is better; 1 pp drawn like 6 %
-        ax.imshow(C, cmap=cmap, norm=norm, aspect="auto")
+        gcol = [k for k, (m, _) in enumerate(METRICS) if m in PP][0]
+        lat = np.ma.masked_array(M, mask=np.zeros_like(M, dtype=bool)); lat.mask[:, gcol] = True
+        ax.imshow(lat, cmap=cmap, norm=norm, aspect="auto")
         for (r, c), v in np.ndenumerate(M):
-            txt = f"{round(v, 1) + 0.0:+.1f}" if pp_col[c] else f"{round(v) + 0.0:+.0f}%"
-            ax.text(c, r, txt, ha="center", va="center", fontsize=fz(6),
-                    color="white" if abs(C[r, c]) >= 55 else INK)
+            if c != gcol:
+                ax.text(c, r, f"{round(v) + 0.0:+.0f}%", ha="center", va="center", fontsize=fz(6),
+                        color="white" if abs(v) >= 55 else INK)
+        overlay_goodput_column(ax, M[:, gcol], gcol, fz(6))
         ax.set_xticks(range(len(METRICS)), [m[1].replace(" ", "\n", 1) for m in METRICS], fontsize=fz(6))
         ax.xaxis.tick_top()
         if ax is axes[0]:
@@ -164,11 +169,8 @@ def f1_payoff(s, save):
         for sp in ax.spines.values():
             sp.set_visible(False)
         ax.set_title(wlab, loc="left", pad=28 if FS > 1 else 20, fontweight="bold")
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-    cb = fig.colorbar(sm, ax=axes, orientation="horizontal", fraction=0.05, pad=0.04, aspect=50)
-    cb.set_label("Change vs. both features off (%; goodput in points)   ←  better   |   worse  →",
-                 fontsize=fz(6.5))
-    cb.outline.set_visible(False)
+    two_colorbars(fig, axes, cmap, norm, "Change vs. both features off (%):  ← better | worse →",
+                  "Goodput change (points):  ← worse | better →", fz(6.2))
     fig.suptitle("RQ2 · What each prefill feature buys, per engine (Mistral-NeMo-12B, conc. 256, L40S)",
                  x=0.06, ha="left", y=1.12, fontsize=fz(7.5))
     save(fig, "fig_rq2_1_payoff_matrix")

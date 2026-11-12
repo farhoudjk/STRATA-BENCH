@@ -486,3 +486,36 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ── shared: goodput column with its own diverging scale (used by the RQ2/RQ3 effect matrices) ──
+GP_CMAP = mcolors.LinearSegmentedColormap.from_list("gp", ["#8c510a", "#d8b365", "#f5f3ee", "#5ab4ac", "#01665e"])
+GP_NORM = mcolors.TwoSlopeNorm(vmin=-15, vcenter=0, vmax=15)
+
+
+def overlay_goodput_column(ax, values, col, fontsize):
+    """Redraw column `col` of a heatmap in the goodput scale (teal = higher goodput, brown = lower),
+    with a white gap before it. `values` are changes in percentage points."""
+    v = np.asarray(values, dtype=float)[:, None]
+    xlim, ylim = ax.get_xlim(), ax.get_ylim()
+    ax.imshow(v, cmap=GP_CMAP, norm=GP_NORM, aspect="auto",
+              extent=(col - 0.5, col + 0.5, len(v) - 0.5, -0.5), zorder=2)
+    ax.set_xlim(*xlim); ax.set_ylim(*ylim)  # keep the full matrix in view
+    ax.axvline(col - 0.5, color="white", linewidth=3.5, zorder=3)
+    for r, x in enumerate(v[:, 0]):
+        ax.text(col, r, f"{round(x, 1) + 0.0:+.1f}", ha="center", va="center", fontsize=fontsize, zorder=4,
+                color="white" if abs(x) >= 10 else INK)
+
+
+def two_colorbars(fig, axes, cmap, norm, label_main, label_gp, fontsize, pad=0.06, height=0.025):
+    """Latency colour bar (left, wide) and goodput colour bar (right, narrow) under the heatmaps."""
+    fig.canvas.draw()
+    boxes = [a.get_position() for a in np.atleast_1d(axes)]
+    x0, x1, y0 = min(b.x0 for b in boxes), max(b.x1 for b in boxes), min(b.y0 for b in boxes)
+    w = x1 - x0
+    c1 = fig.add_axes([x0, y0 - pad - height, w * 0.6, height])
+    c2 = fig.add_axes([x0 + w * 0.7, y0 - pad - height, w * 0.3, height])
+    for cax, cm, nm, lab in ((c1, cmap, norm, label_main), (c2, GP_CMAP, GP_NORM, label_gp)):
+        cb = fig.colorbar(plt.cm.ScalarMappable(norm=nm, cmap=cm), cax=cax, orientation="horizontal")
+        cb.set_label(lab, fontsize=fontsize); cb.outline.set_visible(False)
+        cb.ax.tick_params(labelsize=fontsize * 0.92)

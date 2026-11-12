@@ -30,6 +30,10 @@ import matplotlib.colors as mcolors  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import matplotlib.ticker as mticker  # noqa: E402
 
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parent))
+from plot_flowc import overlay_goodput_column, two_colorbars  # noqa: E402
+
 ENG = {
     "vllm": dict(label="vLLM", color="#2a78d6", marker="o"),
     "sglang": dict(label="SGLang", color="#eb6834", marker="s"),
@@ -147,11 +151,14 @@ def f1_payoff(s, save):
                 rows.append((vals, colour)); labels.append(f"{w} · seqs {q} · {st['label']}")
     V = np.array([r[0] for r in rows]); C = np.array([r[1] for r in rows])
     fig, ax = plt.subplots(figsize=(7.0, 3.6))
-    ax.imshow(C, cmap=cmap, norm=norm, aspect="auto")
+    gcol = [k for k, m in enumerate(METRICS) if m[2] == "pp"][0]
+    lat = np.ma.masked_array(C, mask=np.zeros_like(C, dtype=bool)); lat.mask[:, gcol] = True
+    ax.imshow(lat, cmap=cmap, norm=norm, aspect="auto")
     for (r, c), v in np.ndenumerate(V):
-        unit = " pp" if METRICS[c][2] == "pp" else "%"
-        ax.text(c, r, f"{v:+.0f}{unit}", ha="center", va="center", fontsize=fz(5.8),
-                color="white" if abs(C[r, c]) >= 40 else INK)
+        if c != gcol:
+            ax.text(c, r, f"{v:+.0f}%", ha="center", va="center", fontsize=fz(5.8),
+                    color="white" if abs(C[r, c]) >= 40 else INK)
+    overlay_goodput_column(ax, V[:, gcol], gcol, fz(5.8))
     ax.set_xticks(range(len(METRICS)), [m[1].replace(" ", "\n", 1) if len(m[1]) > 9 else m[1] for m in METRICS],
                   fontsize=fz(6.2))
     ax.xaxis.tick_top()
@@ -161,10 +168,9 @@ def f1_payoff(s, save):
     ax.grid(False)
     for sp in ax.spines.values():
         sp.set_visible(False)
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-    cb = fig.colorbar(sm, ax=ax, orientation="horizontal", fraction=0.04, pad=0.03, aspect=50)
-    cb.set_label("Colour: purple = better, red = worse (throughput and goodput: higher is better)", fontsize=fz(6.5))
-    cb.outline.set_visible(False)
+    two_colorbars(fig, ax, cmap, norm, "Change vs. no speculation (%): purple = better, red = worse",
+                  "Goodput change (points):  ← worse | better →", fz(6.2),
+                  pad=0.03)
     fig.suptitle("RQ3 · What n-gram speculative decoding (k = 3) changes, per engine "
                  "(Mistral-NeMo-12B, conc. 256, L40S; vs. no speculation)", x=0.02, ha="left", y=1.02, fontsize=fz(7.5))
     save(fig, "fig_rq3_1_payoff_matrix")
