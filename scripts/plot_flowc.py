@@ -325,6 +325,7 @@ def c56(d, out):
 
 
 # ── C8: where the wait goes: a typical short and long request (timeline) ─────
+C8_HATCH = {"vllm": "", "sglang": "/////", "tensorrt-llm": "....."}  # pattern per engine, besides colour
 def c8(d, out, model="qwen15_14b"):
     """Median life of a short (code) and a long (reasoning) request on each engine, drawn as a
     timeline from arrival: grey = waiting for the first token, engine colour = generating.
@@ -341,7 +342,8 @@ def c8(d, out, model="qwen15_14b"):
             x = g[g.task_type == t]
             wait, dec, toks = x.ttft_user.median(), x.decode_s.median(), x.output_tokens.median()
             ax.barh(y, wait, height=0.62, color="#cfcdc7", linewidth=0)
-            ax.barh(y, dec, left=wait, height=0.62, color=st["color"], linewidth=0)
+            ax.barh(y, dec, left=wait, height=0.62, color=st["color"], hatch=C8_HATCH[e], edgecolor="white",
+                    linewidth=0)
             ax.text(wait + dec + 4, y, f"{wait:.0f} s + {dec:.0f} s", va="center", fontsize=fz(5.8), color=INK)
             rows.append(dict(model=model, engine=e, task=t, wait_s=wait, decode_s=dec, output_tokens=toks))
             ylab.append(f"{st['label']}, {tl}")
@@ -351,9 +353,12 @@ def c8(d, out, model="qwen15_14b"):
     ax.set_yticks(ypos, ylab, fontsize=fz(5.8)); ax.invert_yaxis()
     ax.set_xlim(0, 380); ax.set_xlabel("Seconds from arrival")
     ax.grid(axis="y", visible=False)
-    ax.legend(handles=[plt.Rectangle((0, 0), 1, 1, color="#cfcdc7", label="waiting for first token"),
-                       plt.Rectangle((0, 0), 1, 1, color=INK2, label="generating (engine colour)")],
-              loc="upper center", bbox_to_anchor=(0.4, -0.28), ncol=2, fontsize=fz(5.8), handlelength=1.2)
+    handles = [plt.Rectangle((0, 0), 1, 1, color="#cfcdc7", label="waiting for first token")] + [
+        plt.Rectangle((0, 0), 1, 1, facecolor=v["color"], hatch=C8_HATCH[k], edgecolor="white",
+                      label=f"generating, {v['label']}") for k, v in ENG.items()]
+    handles = [handles[0], handles[2], handles[1], handles[3]]  # read row-wise in a two-column legend
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.35, -0.28), ncol=2, fontsize=fz(5.8),
+              handlelength=1.6, handleheight=1.1, columnspacing=1.0)
     fig.suptitle(f"C8 · Where the wait goes: median short and long request, {MODEL[model]} "
                  "(mixed_real, conc. 256, max_num_seqs 256)", x=0.06, ha="left", y=1.02, fontsize=fz(7.5))
     save(fig, out, "fig_c8_wait_by_task")
