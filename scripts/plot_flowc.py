@@ -324,43 +324,38 @@ def c56(d, out):
     return pd.DataFrame(recs)
 
 
-# ── C8: where the wait goes, by task (latency breakdown) ────────────────────
-def c8(d, out):
-    """Median time to first token (waiting) and median decode time (generating) per task, stacked.
-    Under first-come, first-served admission every task waits about as long, so the shortest
-    requests spend almost all of their time waiting (head-of-line blocking)."""
+# ── C8: where the wait goes: a typical short and long request (timeline) ─────
+def c8(d, out, model="qwen15_14b"):
+    """Median life of a short (code) and a long (reasoning) request on each engine, drawn as a
+    timeline from arrival: grey = waiting for the first token, engine colour = generating.
+    Under first-come, first-served admission both wait about as long (head-of-line blocking)."""
     s = d[(d.workload_name == "mixed_real") & (d.max_num_seqs == 256) & d.rate_label.isin(RATES) & d.finished
           & (d.output_tokens > 1)].copy()
     s["decode_s"] = s.e2e_s - s.ttft_s
-    tasks = [("code", "code"), ("summarization", "summ."), ("chat", "chat"), ("reasoning", "reason.")]
-    fig, axes = plt.subplots(1, 3, figsize=(3.45, 2.1), gridspec_kw=dict(wspace=0.35))
-    rows = []
-    w = 0.26
-    for ax, (m, mlab) in zip(axes, MODEL.items()):
-        for k, (e, st) in enumerate(ENG.items()):
-            g = s[(s.model == m) & (s.engine == e)]
-            wait = g.groupby("task_type").ttft_user.median().reindex([t for t, _ in tasks])
-            dec = g.groupby("task_type").decode_s.median().reindex([t for t, _ in tasks])
-            x = np.arange(len(tasks)) + (k - 1) * w
-            ax.bar(x, wait.values, width=w * 0.92, color=st["color"], linewidth=0)
-            ax.bar(x, dec.values, bottom=wait.values, width=w * 0.92, color="white", edgecolor=st["color"],
-                   hatch="//////", linewidth=0.5)
-            rows += [dict(model=m, engine=e, task=t, wait_s=wait[t], decode_s=dec[t], n=int((g.task_type == t).sum()))
-                     for t, _ in tasks]
-        ax.set_xticks(range(len(tasks)), [lab for _, lab in tasks], fontsize=fz(5.4), rotation=40, ha="right",
-                      rotation_mode="anchor")
-        ax.set_title(mlab, loc="center", fontsize=fz(6.0), pad=3)
-        ax.grid(axis="x", visible=False)
-        ax.yaxis.set_major_locator(mticker.MaxNLocator(4))
-    axes[0].set_ylabel("Median time (s)")
-    handles = [plt.Rectangle((0, 0), 1, 1, color=v["color"], label=v["label"]) for v in ENG.values()] + [
-               plt.Rectangle((0, 0), 1, 1, color=INK2, label="waiting (TTFT)"),
-                               plt.Rectangle((0, 0), 1, 1, facecolor="white", edgecolor=INK2, hatch="//////",
-                                             label="generating")]
-    fig.legend(handles=handles, loc="upper center", ncol=3, bbox_to_anchor=(0.5, -0.06), handlelength=1.4,
-               columnspacing=0.9, fontsize=fz(6.0))
-    fig.suptitle("C8 · Where the wait goes, by task (mixed_real, conc. 256, max_num_seqs 256, Poisson rates)",
-                 x=0.06, ha="left", y=1.02, fontsize=fz(7.5))
+    tasks = [("code", "short (code)"), ("reasoning", "long (reasoning)")]
+    fig, ax = plt.subplots(figsize=(3.45, 1.9))
+    rows, ylab, y = [], [], 0
+    for e, st in ENG.items():
+        g = s[(s.model == model) & (s.engine == e)]
+        for t, tl in tasks:
+            x = g[g.task_type == t]
+            wait, dec, toks = x.ttft_user.median(), x.decode_s.median(), x.output_tokens.median()
+            ax.barh(y, wait, height=0.62, color="#cfcdc7", linewidth=0)
+            ax.barh(y, dec, left=wait, height=0.62, color=st["color"], linewidth=0)
+            ax.text(wait + dec + 4, y, f"{wait:.0f} s + {dec:.0f} s", va="center", fontsize=fz(5.8), color=INK)
+            rows.append(dict(model=model, engine=e, task=t, wait_s=wait, decode_s=dec, output_tokens=toks))
+            ylab.append(f"{st['label']}, {tl}")
+            y += 1
+        y += 0.5
+    ypos = [i + 0.5 * (i // 2) for i in range(len(ylab))]
+    ax.set_yticks(ypos, ylab, fontsize=fz(5.8)); ax.invert_yaxis()
+    ax.set_xlim(0, 380); ax.set_xlabel("Seconds from arrival")
+    ax.grid(axis="y", visible=False)
+    ax.legend(handles=[plt.Rectangle((0, 0), 1, 1, color="#cfcdc7", label="waiting for first token"),
+                       plt.Rectangle((0, 0), 1, 1, color=INK2, label="generating (engine colour)")],
+              loc="upper center", bbox_to_anchor=(0.4, -0.28), ncol=2, fontsize=fz(5.8), handlelength=1.2)
+    fig.suptitle(f"C8 · Where the wait goes: median short and long request, {MODEL[model]} "
+                 "(mixed_real, conc. 256, max_num_seqs 256)", x=0.06, ha="left", y=1.02, fontsize=fz(7.5))
     save(fig, out, "fig_c8_wait_by_task")
     return pd.DataFrame(rows)
 
