@@ -76,7 +76,7 @@ def style(fs: float = 1.0):
 
 
 # Paper font scale per figure: C2 and C4 are set at column width, the others at text width.
-PAPER_FS = {"c2": 1.12, "c3": 1.22, "c4": 1.22, "c56": 1.22, "c6": 1.12, "c8": 1.12}
+PAPER_FS = {"c2": 1.12, "c3": 1.22, "c4": 1.22, "c56": 1.22, "c6": 1.12, "c8": 1.4}
 PAPER = False  # set by --paper: drop in-figure titles that duplicate LaTeX captions
 
 
@@ -334,7 +334,7 @@ def c8(d, out, model="qwen15_14b"):
           & (d.output_tokens > 1)].copy()
     s["decode_s"] = s.e2e_s - s.ttft_s
     tasks = [("code", "short (code)"), ("reasoning", "long (reasoning)")]
-    fig, ax = plt.subplots(figsize=(3.45, 1.9))
+    fig, ax = plt.subplots(figsize=(3.45, 2.3))
     rows, ylab, y = [], [], 0
     for e, st in ENG.items():
         g = s[(s.model == model) & (s.engine == e)]
@@ -346,7 +346,7 @@ def c8(d, out, model="qwen15_14b"):
                     linewidth=0)
             ax.text(wait + dec + 4, y, f"{wait:.0f} s + {dec:.0f} s", va="center", fontsize=fz(5.8), color=INK)
             rows.append(dict(model=model, engine=e, task=t, wait_s=wait, decode_s=dec, output_tokens=toks))
-            ylab.append(f"{st['label']}, {tl}")
+            ylab.append(f"{st['label']}\n{tl}" if t == "code" else tl)
             y += 1
         y += 0.5
     ypos = [i + 0.5 * (i // 2) for i in range(len(ylab))]
