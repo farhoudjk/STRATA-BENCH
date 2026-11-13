@@ -324,42 +324,44 @@ def c56(d, out):
     return pd.DataFrame(recs)
 
 
-# ── C8: who pays the wait (slowdown by task) ────────────────────────────────
+# ── C8: where the wait goes, by task (latency breakdown) ────────────────────
 def c8(d, out):
-    """Median slowdown E2E / streaming time per task: under first-come, first-served queueing every
-    request waits about as long, so the shortest requests are slowed the most."""
+    """Median time to first token (waiting) and median decode time (generating) per task, stacked.
+    Under first-come, first-served admission every task waits about as long, so the shortest
+    requests spend almost all of their time waiting (head-of-line blocking)."""
     s = d[(d.workload_name == "mixed_real") & (d.max_num_seqs == 256) & d.rate_label.isin(RATES) & d.finished
           & (d.output_tokens > 1)].copy()
-    s["slowdown"] = s.e2e_user / (s.e2e_s - s.ttft_s)
-    tasks = ["code", "summarization", "chat", "reasoning"]
-    fig, axes = plt.subplots(1, 3, figsize=(3.45, 1.95), sharey=True, gridspec_kw=dict(wspace=0.1))
+    s["decode_s"] = s.e2e_s - s.ttft_s
+    tasks = [("code", "code"), ("summarization", "summ."), ("chat", "chat"), ("reasoning", "reason.")]
+    fig, axes = plt.subplots(1, 3, figsize=(3.45, 2.1), gridspec_kw=dict(wspace=0.35))
     rows = []
+    w = 0.26
     for ax, (m, mlab) in zip(axes, MODEL.items()):
-        # dodge engines horizontally and draw vLLM last, so overlapping lines near 1 stay visible
-        for k, e in ((1, "sglang"), (2, "tensorrt-llm"), (0, "vllm")):
-            st = ENG[e]
+        for k, (e, st) in enumerate(ENG.items()):
             g = s[(s.model == m) & (s.engine == e)]
-            v = g.groupby("task_type").slowdown.median().reindex(tasks)
-            w = g.groupby("task_type").ttft_user.median().reindex(tasks)
-            n = g.groupby("task_type").size().reindex(tasks)
-            rows += [dict(model=m, engine=e, task=t, slowdown_p50=v[t], ttft_p50=w[t], n=n[t]) for t in tasks]
-            ax.plot(np.arange(4) + (k - 1) * 0.2, v.values, color=st["color"], marker=st["marker"],
-                    markersize=3.4, linewidth=1.1, markeredgecolor="white", markeredgewidth=0.4,
-                    zorder=4 if e == "vllm" else 3)
-        ax.axhline(1, color=INK2, linestyle=(0, (3, 2)), linewidth=0.7, zorder=1)
-        ax.set_yscale("log"); plain_log(ax.yaxis); ax.set_ylim(0.8, 250)
-        ax.set_xticks(range(4), ["code", "summ.", "chat", "reason."], fontsize=fz(5.6), rotation=40, ha="right",
+            wait = g.groupby("task_type").ttft_user.median().reindex([t for t, _ in tasks])
+            dec = g.groupby("task_type").decode_s.median().reindex([t for t, _ in tasks])
+            x = np.arange(len(tasks)) + (k - 1) * w
+            ax.bar(x, wait.values, width=w * 0.92, color=st["color"], linewidth=0)
+            ax.bar(x, dec.values, bottom=wait.values, width=w * 0.92, color="white", edgecolor=st["color"],
+                   hatch="//////", linewidth=0.5)
+            rows += [dict(model=m, engine=e, task=t, wait_s=wait[t], decode_s=dec[t], n=int((g.task_type == t).sum()))
+                     for t, _ in tasks]
+        ax.set_xticks(range(len(tasks)), [lab for _, lab in tasks], fontsize=fz(5.4), rotation=40, ha="right",
                       rotation_mode="anchor")
-        ax.set_xlim(-0.4, 3.4)
-        ax.set_title(mlab, loc="center", fontsize=fz(6.2), pad=3)
+        ax.set_title(mlab, loc="center", fontsize=fz(6.0), pad=3)
         ax.grid(axis="x", visible=False)
-    axes[0].set_ylabel("Slowdown (×)\nend-to-end ÷ decode time")
-    axes[0].yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:g}×"))
-    fig.legend(handles=eng_handles(True), loc="upper center", ncol=3, bbox_to_anchor=(0.5, -0.06),
-               handlelength=1.6)
-    fig.suptitle("C8 · Who pays the wait: slowdown by task (mixed_real, conc. 256, max_num_seqs 256, Poisson rates)",
+        ax.yaxis.set_major_locator(mticker.MaxNLocator(4))
+    axes[0].set_ylabel("Median time (s)")
+    handles = [plt.Rectangle((0, 0), 1, 1, color=v["color"], label=v["label"]) for v in ENG.values()] + [
+               plt.Rectangle((0, 0), 1, 1, color=INK2, label="waiting (TTFT)"),
+                               plt.Rectangle((0, 0), 1, 1, facecolor="white", edgecolor=INK2, hatch="//////",
+                                             label="generating")]
+    fig.legend(handles=handles, loc="upper center", ncol=3, bbox_to_anchor=(0.5, -0.06), handlelength=1.4,
+               columnspacing=0.9, fontsize=fz(6.0))
+    fig.suptitle("C8 · Where the wait goes, by task (mixed_real, conc. 256, max_num_seqs 256, Poisson rates)",
                  x=0.06, ha="left", y=1.02, fontsize=fz(7.5))
-    save(fig, out, "fig_c8_slowdown_by_task")
+    save(fig, out, "fig_c8_wait_by_task")
     return pd.DataFrame(rows)
 
 
@@ -479,7 +481,7 @@ def main():
     d = load(a.rq1_dir, a.cache or a.rq1_dir / "rq1_flowc.parquet")
     for name, fn, csv in ((("c2", c2, "c2_load_response"), ("c3", c3, "c3_streaming_quality"), ("c4", c4, "c4_e2e"),
                            ("c56", c56, "c5_c6_outcomes_goodput"), ("c7", c7, "c7_max_num_seqs"),
-                           ("c6", c6, "c6_goodput"), ("c8", c8, "c8_slowdown_by_task"), ("s1", s1, "s1_tight_tpot_goodput"))):
+                           ("c6", c6, "c6_goodput"), ("c8", c8, "c8_wait_by_task"), ("s1", s1, "s1_tight_tpot_goodput"))):
         style(fs.get(name, 1.0))
         fn(d, a.out).to_csv(a.out / f"{csv}.csv", index=False)
     print(f"Done → {a.out}/")
