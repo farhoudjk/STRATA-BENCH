@@ -304,7 +304,7 @@ def c56(d, out):
         ax.imshow(M, cmap=cmap, vmin=0, vmax=100, aspect="auto")
         for (r, c), v in np.ndenumerate(M):
             ax.text(c, r, f"{v:.0f}", ha="center", va="center", fontsize=fz(6.5),
-                    color="white" if v >= 55 else INK, fontweight="bold" if v == M[r].max() else "normal")
+                    color="white" if v >= 55 else INK, fontweight="bold" if round(v) == round(M[r].max()) else "normal")
         ax.set_xticks(range(len(ENG)), [v["label"] for v in ENG.values()], fontsize=fz(6), rotation=20, ha="right")
         ax.set_yticks([]); ax.grid(False)
         for sp in ax.spines.values():
@@ -452,7 +452,7 @@ def s1(d, out):
         ax.imshow(M, cmap=cmap, vmin=0, vmax=100, aspect="auto")
         for (r, c), v in np.ndenumerate(M):
             ax.text(c, r, f"{v:.0f}", ha="center", va="center", fontsize=fz(6.5),
-                    color="white" if v >= 55 else INK, fontweight="bold" if v == M[r].max() else "normal")
+                    color="white" if v >= 55 else INK, fontweight="bold" if round(v) == round(M[r].max()) else "normal")
             recs.append(dict(tier=name, workload=cells[r][0], model=cells[r][1], engine=list(ENG)[c], goodput=v))
         ax.set_xticks(range(len(ENG)), [v["label"] for v in ENG.values()], fontsize=fz(6), rotation=20, ha="right")
         ax.set_yticks(range(len(cells)) if k == 0 else [], [f"{MODEL[m]} · {w}" for w, m in cells] if k == 0 else [],
